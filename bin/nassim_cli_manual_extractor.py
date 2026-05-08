@@ -320,7 +320,7 @@ def extract_examples(section: Optional[Node]) -> List[List[str]]:
         if child.tag == "pre":
             pre_nodes.insert(0, child)
         for pre in pre_nodes:
-            lines = split_nonempty_lines(pre.text(block=False))
+            lines = split_nonempty_lines(pre.text(block=True))
             if lines:
                 examples.append(lines)
     return examples
