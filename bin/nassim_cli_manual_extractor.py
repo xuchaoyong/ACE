@@ -189,7 +189,13 @@ def _node_text(node: Node, block: bool, var_brackets: bool) -> Iterator[str]:
         node.has_class("varname") or node.tag == "varname"
     )
     if wraps_var:
-        inner = normalize_inline("".join(_node_text(child, block=False, var_brackets=False)) if isinstance(child, Node) else str(child) for child in node.children)
+        inner_parts: List[str] = []
+        for child in node.children:
+            if isinstance(child, Node):
+                inner_parts.extend(_node_text(child, block=False, var_brackets=False))
+            else:
+                inner_parts.append(str(child))
+        inner = normalize_inline("".join(inner_parts))
         if inner:
             yield f"<{inner}>"
         return
