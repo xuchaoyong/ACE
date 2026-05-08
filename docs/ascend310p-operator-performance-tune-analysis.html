@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ascend 310P 算子性能调优 Skill 工作原理分析</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #5f6b7a;
+      --line: #d9e2ec;
+      --brand: #2458d3;
+      --brand-2: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --code-bg: #0f172a;
+      --code-text: #e5e7eb;
+      --soft-blue: #e8f0ff;
+      --soft-green: #e8f7f3;
+      --soft-amber: #fff7e6;
+      --soft-red: #fff1f2;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+        "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.72;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    header {
+      padding: 48px 24px 36px;
+      color: #fff;
+      background:
+        radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.2), transparent 25%),
+        linear-gradient(135deg, #0f172a 0%, #1e3a8a 52%, #0f766e 100%);
+    }
+
+    header .wrap,
+    main {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(30px, 5vw, 52px);
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      max-width: 920px;
+      margin: 0;
+      font-size: 18px;
+      color: rgba(255, 255, 255, 0.86);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 650;
+      color: #0f172a;
+      background: rgba(255, 255, 255, 0.86);
+    }
+
+    main {
+      padding: 28px 0 56px;
+    }
+
+    nav.toc,
+    section,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+    }
+
+    nav.toc {
+      padding: 22px 24px;
+      margin-bottom: 24px;
+    }
+
+    nav.toc h2 {
+      margin-top: 0;
+    }
+
+    nav.toc ol {
+      columns: 2;
+      margin: 0;
+      padding-left: 22px;
+    }
+
+    nav.toc a {
+      color: var(--brand);
+      text-decoration: none;
+    }
+
+    section {
+      padding: 28px;
+      margin: 24px 0;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 28px;
+      line-height: 1.25;
+      color: #111827;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 21px;
+      color: #172554;
+    }
+
+    h4 {
+      margin: 18px 0 8px;
+      font-size: 17px;
+      color: #0f172a;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    a {
+      color: var(--brand);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin: 18px 0;
+    }
+
+    .grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 18px;
+      box-shadow: none;
+    }
+
+    .card h3,
+    .card h4 {
+      margin-top: 0;
+    }
+
+    .note,
+    .warning,
+    .danger,
+    .equation {
+      border-radius: 14px;
+      padding: 15px 18px;
+      margin: 16px 0;
+      border: 1px solid;
+    }
+
+    .note {
+      border-color: #bfdbfe;
+      background: var(--soft-blue);
+    }
+
+    .warning {
+      border-color: #fde68a;
+      background: var(--soft-amber);
+    }
+
+    .danger {
+      border-color: #fecdd3;
+      background: var(--soft-red);
+    }
+
+    .equation {
+      overflow-x: auto;
+      border-color: #bbf7d0;
+      background: var(--soft-green);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      line-height: 1.8;
+      white-space: nowrap;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      color: #0f172a;
+      background: #e5e7eb;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 16px 18px;
+      border-radius: 14px;
+      color: var(--code-text);
+      background: var(--code-bg);
+      line-height: 1.6;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef2ff;
+      color: #1e1b4b;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #fafafa;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+
+    .flow div {
+      position: relative;
+      min-height: 92px;
+      padding: 14px;
+      border: 1px solid #bfdbfe;
+      border-radius: 14px;
+      background: #eff6ff;
+    }
+
+    .flow div:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 50%;
+      right: -13px;
+      z-index: 1;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      color: #fff;
+      background: var(--brand);
+      text-align: center;
+      line-height: 22px;
+      transform: translateY(-50%);
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #064e3b;
+      background: #ccfbf1;
+    }
+
+    .source-list li {
+      margin-bottom: 6px;
+    }
+
+    footer {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto 44px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      nav.toc ol {
+        columns: 1;
+      }
+
+      .grid,
+      .grid.two,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      .flow div:not(:last-child)::after {
+        content: "↓";
+        top: auto;
+        right: 50%;
+        bottom: -15px;
+        transform: translateX(50%);
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Ascend 310P 算子性能调优 Skill 工作原理分析</h1>
+      <p class="subtitle">
+        基于 <code>ascend310p-operator-performance-tune/SKILL.md</code> 的流程说明，
+        从硬件瓶颈、block 化建模、代价函数、离散优化与实测验收门控五个角度解释其背后的数学建模和优化思想。
+      </p>
+      <div class="meta">
+        <span class="pill">对象：Ascend 310P 自定义算子</span>
+        <span class="pill">主题：性能调优 / MTE2 优先 / recipe gate</span>
+        <span class="pill">输出：独立 HTML 分析文档</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <nav class="toc" aria-label="目录">
+      <h2>目录</h2>
+      <ol>
+        <li><a href="#summary">一句话总览</a></li>
+        <li><a href="#source">原文要点</a></li>
+        <li><a href="#hardware">310P 硬件瓶颈：为什么 MTE2 优先</a></li>
+        <li><a href="#workflow">整体工作流</a></li>
+        <li><a href="#model">数学建模：从 block 到 composite lower bound</a></li>
+        <li><a href="#optimization">优化问题抽象</a></li>
+        <li><a href="#recipes">Recipe 类型与模型效果</a></li>
+        <li><a href="#gate">4 步验收门控</a></li>
+        <li><a href="#measurement">预测、实测与校准</a></li>
+        <li><a href="#deprecated">与 B12/B13/B14 新流程的关系</a></li>
+        <li><a href="#takeaways">关键结论</a></li>
+      </ol>
+    </nav>
+
+    <section id="summary">
+      <h2>1. 一句话总览</h2>
+      <p>
+        这个 Skill 的核心思想是：把一个 Ascend 310P 算子拆成若干可识别的计算/搬运
+        <strong>block</strong>，对每个 block 套用已有的调优 <strong>recipe</strong>，
+        用硬件感知的代价模型预测总周期数下降幅度，再通过正确性和性能实测决定是否接受代码修改。
+      </p>
+      <div class="note">
+        它不是“凭经验改代码”的清单，而是一个带约束的离散优化循环：
+        <strong>候选变换生成 → 谓词过滤 → 代价模型估计 → 回归约束检查 → 实测确认 → 接受或回滚</strong>。
+      </div>
+    </section>
+
+    <section id="source">
+      <h2>2. 原文要点</h2>
+      <p>
+        原始 <code>SKILL.md</code> 说明该 skill 已被 B12/B13/B14 机制化流程取代，但仍保留了完整的
+        调优思想：读取 <code>block_decomposition.yaml</code>、参考每类 block 的
+        <code>recipes.md</code> 和 <code>cost_model.py</code>，并使用统一的 5% speedup gate。
+      </p>
+      <ul class="source-list">
+        <li>输入：B8 性能摘要、B5 block 分解、B4 tiling 选择、block recipe 库、block cost model、决策规则和 composite lower bound。</li>
+        <li>输出：修改后的 kernel / tiling 代码，以及记录预测与实测结果的 <code>tuning_log.md</code>。</li>
+        <li>优先级：310P 上通常先处理 MTE2，再处理 MTE3、Cube、V、S。</li>
+        <li>验收：预测总周期下降至少 5%，其他 shape 预测退化小于 2%，实测正确性和性能达标。</li>
+        <li>迭代：接受一个 recipe 后重新识别瓶颈，因为一次优化会改变后续候选 recipe 的有效性。</li>
+      </ul>
+      <div class="warning">
+        注意：原文明确标记为 <strong>DEPRECATED</strong>。也就是说，当前工程化落地应看 B12 baseline-measure、
+        B13 improvement-audit、B14 improvement-apply；但本文件分析的是这个旧 skill 中体现的调优原理。
+      </div>
+    </section>
+
+    <section id="hardware">
+      <h2>3. 310P 硬件瓶颈：为什么 MTE2 优先</h2>
+      <p>
+        Ascend 算子性能通常受多条 pipeline 共同限制。文中强调 310P 是“data-heavy”场景下容易被
+        MTE2 限制的芯片：MTE2 负责 GM 到片上存储的数据读取；Cube 负责矩阵计算。若数据供给速度低于
+        Cube 消耗速度，计算单元即使理论吞吐很高，也会因为等待数据而空转。
+      </p>
+      <div class="grid three">
+        <div class="card">
+          <h3>MTE2</h3>
+          <p>主要代表 GM 读入带宽和 DMA 调度开销，是很多 matmul 类算子的首要瓶颈。</p>
+        </div>
+        <div class="card">
+          <h3>Cube</h3>
+          <p>矩阵乘/张量计算吞吐高，只有数据供给充分时才会成为主瓶颈。</p>
+        </div>
+        <div class="card">
+          <h3>V / S</h3>
+          <p>向量后处理、标量控制、同步和访存编排会形成次级瓶颈或依赖链。</p>
+        </div>
+      </div>
+      <p>
+        这个判断类似 <strong>roofline 模型</strong>：性能上界由“算力上限”和“带宽上限”共同决定。
+        当算子的有效算术强度不足，或者存在大量小 DMA、重复加载、未合并 scale/per-token 数据时，
+        实际速度会落在 MTE2 带宽/延迟上界附近。
+      </p>
+      <div class="equation">
+        attainable_cycles ≥ max(compute_cycles, memory_bytes / memory_bandwidth + dma_setup_cycles)
+      </div>
+      <p>
+        原文给出的直觉数据是：Cube 可向 L0 发出约 1024 B/cyc 的需求，而 MTE2 约为每核 17 B/cyc，
+        8 核合计约 136 B/cyc。两者数量级不匹配时，优化优先级自然是：
+      </p>
+      <ol>
+        <li><strong>消除 MTE2 burst 和小包开销</strong>：合并 DMA、增大 chunk、减少 setup 次数。</li>
+        <li><strong>提升数据复用</strong>：L2 super-tile、cooperative-batch、snake-zigzag 等减少重复读。</li>
+        <li><strong>隐藏延迟</strong>：ping-pong buffer、多阶段 prefetch、MTE 与计算重叠。</li>
+        <li><strong>降低需求</strong>：把 scale/cast/broadcast 从热路径移走或与其他 pipeline 合并。</li>
+      </ol>
+    </section>
+
+    <section id="workflow">
+      <h2>4. 整体工作流</h2>
+      <p>
+        Skill 的工作流可以理解为一个闭环控制系统：先观测当前算子的瓶颈，再生成候选动作，预测动作收益，
+        实施动作，最后用测量反馈修正判断。
+      </p>
+      <div class="flow">
+        <div><strong>Step 1</strong><br>读取 perf_summary，识别每个 shape 的 bound pipe。</div>
+        <div><strong>Step 2</strong><br>遍历 block_decomposition，为每个 block 枚举 recipe。</div>
+        <div><strong>Step 3</strong><br>使用 predicate 和 cost model 筛选候选 recipe。</div>
+        <div><strong>Step 4</strong><br>修改 tiling 或 kernel，运行 correctness 与 perf eval。</div>
+        <div><strong>Step 5</strong><br>记录 tuning log，接受/回滚并继续迭代。</div>
+      </div>
+      <p>
+        关键点在于“每次只接受通过门控的局部变换”。原因是性能优化不是线性叠加：
+        一个 recipe 改变了数据布局、tile 大小、buffer 复用或同步关系后，原先的瓶颈 pipe 可能消失，
+        另一个 pipe 可能变成新瓶颈，后续 recipe 的谓词和收益都需要重新计算。
+      </p>
+    </section>
+
+    <section id="model">
+      <h2>5. 数学建模：从 block 到 composite lower bound</h2>
+      <h3>5.1 状态变量</h3>
+      <p>
+        令一个算子的当前实现状态为 <code>θ</code>，其中包含 tiling 参数、block 实例参数、buffer 策略、
+        pipeline 排布、DMA chunk 组织方式、是否使用 ping-pong 等。对每个测试 shape <code>s</code>，
+        代价模型估计该状态下的执行周期。
+      </p>
+      <div class="equation">
+        θ = {tile_m, tile_n, tile_k, block_params, dma_chunks, buffer_policy, pipeline_schedule, ...}
+      </div>
+
+      <h3>5.2 分块代价模型</h3>
+      <p>
+        原文要求每类 block 有自己的 <code>cost_model.py</code>。这意味着总代价不是一个黑盒函数，
+        而是由 block 级局部模型组合而成。例如 DMA 读取、矩阵乘、向量后处理、输出写回分别贡献不同
+        pipeline 的周期数。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>模型项</th>
+            <th>典型含义</th>
+            <th>受哪些 recipe 影响</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>L_MTE2</code></td>
+            <td>GM 读入周期，含 DMA setup、实际搬运、对齐与重复读取。</td>
+            <td>DMA merge、larger chunk、L2 super-tile、cooperative-batch、scale coalesce。</td>
+          </tr>
+          <tr>
+            <td><code>L_MTE3</code></td>
+            <td>结果写回周期，含输出小 chunk 写回开销。</td>
+            <td>MTE3 coalesce、输出布局调整。</td>
+          </tr>
+          <tr>
+            <td><code>L_Cube</code></td>
+            <td>矩阵计算周期，受 tile 形状、baseK、L0A/L0B 利用率影响。</td>
+            <td>shape-aware baseN、baseK ceiling、online-softmax fused with MMAD。</td>
+          </tr>
+          <tr>
+            <td><code>L_V</code></td>
+            <td>向量后处理周期，例如 scale、cast、broadcast、softmax、dequant。</td>
+            <td>pre-broadcast、drop V scaling、hoist + peel、no-pingpong。</td>
+          </tr>
+          <tr>
+            <td><code>L_sync</code></td>
+            <td>PipeBarrier、buffer 轮转、跨 pipe 依赖造成的等待。</td>
+            <td>drop V-S sync、ping-pong、pipeline 重排。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>5.3 Composite lower bound</h3>
+      <p>
+        “composite lower bound” 可以理解为一个跨 block、跨 pipeline 的理论下界估计。
+        如果若干 pipeline 能充分重叠，总周期不等于所有 pipeline 周期简单相加，而更接近最长那条
+        关键路径；如果存在依赖、同步或资源冲突，则需要额外加入不能重叠的部分。
+      </p>
+      <div class="equation">
+        L_total(s, θ) = max(L_MTE2, L_MTE3, L_Cube, L_V, L_S) + L_dep + L_sync + L_tail
+      </div>
+      <p>
+        这里的 <code>max(...)</code> 体现 pipeline 并行重叠；<code>L_dep</code> 表示前后 block 的数据依赖；
+        <code>L_sync</code> 表示 barrier 和 buffer 切换；<code>L_tail</code> 表示 tile 不整除、尾块处理等边界开销。
+      </p>
+
+      <h3>5.4 DMA 模型的典型形式</h3>
+      <p>
+        原文多处强调“小 DMA chunk”和“422-cyc prologue amortized”。抽象为数学模型时，
+        MTE2 周期通常由固定调用开销和按字节搬运开销组成：
+      </p>
+      <div class="equation">
+        L_MTE2 = λ_setup · N_calls + Bytes_read / BW_MTE2 + L_align + L_refetch
+      </div>
+      <ul>
+        <li><code>λ_setup</code>：每次 DMA 调用的固定启动/前导开销。</li>
+        <li><code>N_calls</code>：DMA 调用次数，小 chunk 越多该项越大。</li>
+        <li><code>Bytes_read / BW_MTE2</code>：数据体积除以有效带宽。</li>
+        <li><code>L_align</code>：未按 512 B 等边界对齐造成的惩罚。</li>
+        <li><code>L_refetch</code>：L2/L1 复用失败导致的重复读取。</li>
+      </ul>
+      <p>
+        因此 DMA merge 的数学效果是减少 <code>N_calls</code>；L2 super-tile 的效果是减少
+        <code>L_refetch</code>；cooperative-batch 的效果是在多个 core 或 batch 之间摊薄共享权重读取。
+      </p>
+    </section>
+
+    <section id="optimization">
+      <h2>6. 优化问题抽象</h2>
+      <p>
+        每个 recipe 都是一个离散变换 <code>r</code>，把当前实现状态 <code>θ</code> 映射为新状态
+        <code>r(θ)</code>。调优任务就是在有限 recipe 集合中寻找一串变换，使目标 shape 的总周期下降，
+        同时其他 shape 不明显退化。
+      </p>
+      <div class="equation">
+        choose r ∈ R to minimize L_total(s*, r(θ))
+        subject to P_r(s*, θ) = true
+      </div>
+      <div class="equation">
+        speedup_pred(r) = (L_total(s*, θ) - L_total(s*, r(θ))) / L_total(s*, θ)
+      </div>
+      <div class="equation">
+        accept only if speedup_pred(r) ≥ 0.05 and
+        max_{s ∈ LIGHT, s ≠ s*} (L_total(s, r(θ)) - L_total(s, θ)) / L_total(s, θ) &lt; 0.02
+      </div>
+      <p>
+        这不是连续优化中的梯度下降，因为 recipe 是离散程序变换，很多变量也是整数或枚举：
+        tile 个数、baseN/baseK、是否 ping-pong、是否启用 cooperative batch、DMA chunk 合并策略等。
+        所以它更像 <strong>约束下的贪心搜索 / 局部搜索</strong>：
+      </p>
+      <pre><code>while true:
+    identify_bound_pipe()
+    candidates = []
+    for block in block_decomposition:
+        for recipe in recipes[block.type]:
+            if predicate(recipe, block, θ):
+                Δ = cost_model_gain(recipe, θ)
+                if Δ >= 5% and regression_on_other_shapes < 2%:
+                    candidates.append(recipe)
+
+    if candidates is empty:
+        break
+
+    apply(best_candidate_by_priority_or_gain)
+    if correctness_passes and measured_gain_matches_prediction:
+        keep_change()
+    else:
+        revert_change()
+        record_model_gap()</code></pre>
+      <p>
+        这里的“贪心”并不粗糙，因为每个候选都必须通过硬件谓词和实测门控；它牺牲全局最优保证，
+        换取可解释、可回滚、适合工程自动化的安全迭代。
+      </p>
+    </section>
+
+    <section id="recipes">
+      <h2>7. Recipe 类型与模型效果</h2>
+      <h3>7.1 MTE2 主线 recipe</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Recipe</th>
+            <th>触发条件的数学含义</th>
+            <th>优化目标</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>DMA merge / chunk merge</td>
+            <td>chunk_size &lt; 512 B 且 MTE2-bound，说明固定 setup 开销占比高。</td>
+            <td>降低 <code>λ_setup · N_calls</code>。</td>
+          </tr>
+          <tr>
+            <td>Larger DMA chunk</td>
+            <td>MTE2 prologue cost &gt; 30%，说明启动开销没有被大块数据摊薄。</td>
+            <td>提高 chunk 粒度，摊薄约 422 cyc prologue。</td>
+          </tr>
+          <tr>
+            <td>L2 super-tile</td>
+            <td>super-tile ≤ 0.52 · L2 size，说明有缓存容量容纳复用窗口。</td>
+            <td>降低重复 GM 读取，即降低 <code>L_refetch</code>。</td>
+          </tr>
+          <tr>
+            <td>Cooperative-batch</td>
+            <td><code>fracM ≥ aicNum</code> 且权重可共享，说明分组后不会让核闲置。</td>
+            <td>多个 batch/core 共享权重加载，降低每单位计算的 bytes_read。</td>
+          </tr>
+          <tr>
+            <td>Scale / pertoken coalesce</td>
+            <td>scale 或 per-token 参数存在大量小 DMA。</td>
+            <td>合并零碎控制数据读取，减少小包与同步。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>7.2 片上 pipeline recipe</h3>
+      <p>
+        当 MTE2 不再是唯一瓶颈后，片上 pipeline recipe 主要处理 L0/L1/UB 的并行和复用。
+      </p>
+      <div class="grid two">
+        <div class="card">
+          <h4>L0C / L0A / L0B ping-pong</h4>
+          <p>
+            用双缓冲把搬运和计算重叠。模型上不是减少总工作量，而是减少关键路径等待：
+            <code>L_total</code> 从近似相加变为更接近 <code>max(load, compute)</code>。
+          </p>
+        </div>
+        <div class="card">
+          <h4>shape-aware baseN / baseK</h4>
+          <p>
+            通过选择 tile 形状平衡 L0A/L0B 利用率和 MMAD 指令约束，减少 padding、尾块和寄存器/缓存浪费。
+          </p>
+        </div>
+        <div class="card">
+          <h4>Pre-broadcast / hoist + peel</h4>
+          <p>
+            把循环不变量移出内层循环，模型上减少每次迭代的 V-pipe 工作量：
+            <code>L_V = N_iter · C_inner + C_outer</code> 中的 <code>C_inner</code> 下降。
+          </p>
+        </div>
+        <div class="card">
+          <h4>PipeBarrier removal</h4>
+          <p>
+            当硬件/语义允许时移除冗余同步，直接降低 <code>L_sync</code>，并增加 pipeline 重叠空间。
+          </p>
+        </div>
+      </div>
+
+      <h3>7.3 跨 block recipe</h3>
+      <p>
+        L2 super-tile、cooperative-batch、snake-zigzag、N-axis cooperation 这类优化不是只改变单个语句，
+        而是改变多个 block 之间的数据复用关系。它们需要 composite cost model，因为收益可能发生在
+        另一个 block 的 MTE2 读入或 L2 命中率上。
+      </p>
+    </section>
+
+    <section id="gate">
+      <h2>8. 4 步验收门控</h2>
+      <p>
+        原文的 recipe gate 是整个系统最重要的安全机制。它把“可能有用的优化经验”变成“可以自动化执行的工程决策”。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>步骤</th>
+            <th>判断</th>
+            <th>对应的数学/工程意义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1. Applicability</td>
+            <td>recipe predicate 是否成立。</td>
+            <td>定义可行域，避免把 recipe 用在经验规律不成立的区域。</td>
+          </tr>
+          <tr>
+            <td>2. Predicted speedup</td>
+            <td><code>L_total</code> 预测下降是否 ≥ 5%。</td>
+            <td>过滤噪声级优化，要求收益超过测量波动和维护成本。</td>
+          </tr>
+          <tr>
+            <td>3. No regression elsewhere</td>
+            <td>LIGHT batch 其他 shape 预测退化是否 &lt; 2%。</td>
+            <td>把单 shape 优化转成多 shape 约束优化，避免局部过拟合。</td>
+          </tr>
+          <tr>
+            <td>4. Measurement</td>
+            <td>B7 正确性通过，B8 实测收益与预测一致，否则回滚。</td>
+            <td>用真实性能闭环校验模型；错误模型会被记录为后续校准项。</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="equation">
+        speedup_meas = (L_before_meas - L_after_meas) / L_before_meas
+      </div>
+      <div class="equation">
+        keep if speedup_meas ≥ 0.05 and correctness = PASS and no_shape_regresses_more_than_2%
+      </div>
+      <p>
+        “预测收益未在 ±50% 内兑现就回滚”的含义是：调优系统不只追求当前一次改动成功，还维护模型可信度。
+        若预测 10% 但实测只有 2%，这个 discrepancy 本身就是一条有价值的 B11 finding：
+        可能 predicate 不够精确，也可能带宽、setup、同步等常数需要重新标定。
+      </p>
+    </section>
+
+    <section id="measurement">
+      <h2>9. 预测、实测与校准</h2>
+      <p>
+        这个 Skill 的工程成熟度体现在它强制记录预测与实测：每个 recipe 的日志都包含预测前后周期、
+        实测前后周期、其他 shape 的最大回归、最终 verdict 和代码位置。
+      </p>
+      <div class="grid two">
+        <div class="card">
+          <h3>为什么需要预测</h3>
+          <p>
+            Ascend kernel 调优成本高，搜索空间大。先用 cost model 排除低收益或高风险候选，可以显著减少
+            编译、部署和 profiling 次数。
+          </p>
+        </div>
+        <div class="card">
+          <h3>为什么必须实测</h3>
+          <p>
+            下界模型会忽略缓存冲突、调度细节、bank conflict、真实 DMA 聚合效果等因素。
+            实测是最终裁判，防止模型误导代码修改。
+          </p>
+        </div>
+      </div>
+      <h3>校准视角</h3>
+      <p>
+        如果把模型参数写成 <code>β = {BW_MTE2, λ_setup, L_sync_const, cache_hit_rate, ...}</code>，
+        那么每次预测与实测的偏差都可以反过来用于估计参数误差：
+      </p>
+      <div class="equation">
+        error(r, s) = L_measured(s, r(θ)) - L_predicted(s, r(θ); β)
+      </div>
+      <p>
+        当同一类 recipe 在多个 shape 上持续偏差，说明 <code>β</code> 或 predicate 需要更新。
+        这也解释了为什么新流程拆成 B12/B13/B14：baseline 负责测量和 gap analysis，
+        audit 负责机器可读谓词评估，apply 负责受控变换与实测验收。
+      </p>
+    </section>
+
+    <section id="deprecated">
+      <h2>10. 与 B12/B13/B14 新流程的关系</h2>
+      <p>
+        原文开头说明这个 skill 已被三个更机械化的步骤取代。可以把两者关系理解为：
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>旧 Skill 中的概念</th>
+            <th>新流程中的归属</th>
+            <th>作用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>读取 baseline、识别瓶颈、分析 cost-model gap</td>
+            <td>B12 baseline-measure</td>
+            <td>建立当前性能事实和模型误差。</td>
+          </tr>
+          <tr>
+            <td>枚举 recipe、评估 predicate、排序候选</td>
+            <td>B13 improvement-audit</td>
+            <td>生成可解释的候选 finding。</td>
+          </tr>
+          <tr>
+            <td>应用 recipe、重跑 B7/B12、接受或回滚</td>
+            <td>B14 improvement-apply</td>
+            <td>执行受控代码变换，并以实测门控收敛。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        也就是说，旧 skill 仍然是理解调优策略的好入口；新流程只是把 prose 中的 recipe 选择和验收逻辑
+        转成 DSL、脚本和更严格的自动化执行。
+      </p>
+    </section>
+
+    <section id="takeaways">
+      <h2>11. 关键结论</h2>
+      <ol>
+        <li>
+          <strong>它的本质是硬件感知的离散优化。</strong>
+          recipe 是离散程序变换，predicate 定义可行域，cost model 定义目标函数，gate 定义约束。
+        </li>
+        <li>
+          <strong>MTE2 优先来自 roofline/带宽瓶颈判断。</strong>
+          当 GM 读入无法喂饱 Cube，优先减少 MTE2 调用次数、重复读取和等待，而不是盲目提高计算吞吐。
+        </li>
+        <li>
+          <strong>Composite lower bound 是跨 pipeline 的关键路径估计。</strong>
+          能重叠的部分取最大值，不能重叠的依赖、同步、尾块开销额外计入。
+        </li>
+        <li>
+          <strong>5% speedup 与 2% regression 是工程阈值。</strong>
+          前者过滤不稳定小收益，后者避免对某个 shape 过拟合。
+        </li>
+        <li>
+          <strong>预测必须被实测闭环校验。</strong>
+          若模型收益没有兑现，正确做法是回滚并记录模型差距，而不是继续堆叠不可信优化。
+        </li>
+      </ol>
+      <div class="danger">
+        最容易犯的错误是把 recipe 当作固定技巧列表逐条套用。原文强调的恰恰相反：
+        recipe 必须由 predicate、cost model、no-regression check 和 measurement 同时批准。
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Generated analysis for the referenced ascend310p-operator-performance-tune SKILL.md.
+  </footer>
+</body>
+</html>
