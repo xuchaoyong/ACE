@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent 时代，为什么 CPU 推理优化反而更重要了？| 关键洞察与研究方向</title>
+<style>
+  :root {
+    --bg-0: #0b0d12;
+    --bg-1: #11141c;
+    --bg-2: #161a26;
+    --line: #232838;
+    --text: #e6e9f2;
+    --muted: #9aa3b8;
+    --brand: #7c5cff;
+    --brand-2: #28d3c2;
+    --warn: #ff9f43;
+    --good: #3ddc97;
+    --danger: #ff5b7a;
+    --code-bg: #0f1320;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background:
+      radial-gradient(1200px 600px at 10% -10%, rgba(124,92,255,.18), transparent 60%),
+      radial-gradient(1000px 500px at 110% 10%, rgba(40,211,194,.14), transparent 55%),
+      var(--bg-0);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+                 "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--brand-2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 64px 28px 96px;
+  }
+
+  /* ===== Hero ===== */
+  .hero {
+    position: relative;
+    padding: 56px 44px;
+    border-radius: 24px;
+    background:
+      linear-gradient(135deg, rgba(124,92,255,.22), rgba(40,211,194,.14) 60%, rgba(255,159,67,.10)),
+      var(--bg-1);
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .hero::before {
+    content: "";
+    position: absolute; inset: -2px;
+    background: radial-gradient(600px 200px at 0% 0%, rgba(124,92,255,.25), transparent 60%);
+    pointer-events: none;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--brand-2);
+    background: rgba(40,211,194,.08);
+    border: 1px solid rgba(40,211,194,.25);
+    padding: 6px 12px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+  }
+  h1 {
+    font-size: clamp(28px, 4.2vw, 44px);
+    line-height: 1.25;
+    margin: 0 0 16px;
+    letter-spacing: -0.01em;
+    background: linear-gradient(90deg, #ffffff, #c8c0ff 55%, #7be3d6);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .subtitle {
+    font-size: 17px;
+    color: var(--muted);
+    max-width: 760px;
+    margin: 0;
+  }
+  .hero-meta {
+    margin-top: 24px;
+    display: flex; flex-wrap: wrap; gap: 10px;
+  }
+  .tag {
+    font-size: 12px;
+    color: var(--text);
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--line);
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+
+  /* ===== Sections ===== */
+  section { margin-top: 56px; }
+  h2 {
+    font-size: clamp(22px, 2.6vw, 28px);
+    margin: 0 0 8px;
+    letter-spacing: -0.005em;
+  }
+  h2 .num {
+    display: inline-block;
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #0b0d12;
+    font-weight: 800;
+    text-align: center;
+    line-height: 36px;
+    margin-right: 12px;
+    font-size: 16px;
+    vertical-align: 2px;
+  }
+  h3 {
+    font-size: 18px;
+    margin: 22px 0 8px;
+    color: #fff;
+  }
+  .lead {
+    color: var(--muted);
+    margin: 0 0 22px;
+    max-width: 880px;
+  }
+
+  /* ===== TL;DR ===== */
+  .tldr {
+    margin-top: 32px;
+    padding: 22px 24px;
+    border-left: 3px solid var(--brand);
+    background: linear-gradient(90deg, rgba(124,92,255,.10), transparent 70%);
+    border-radius: 10px;
+  }
+  .tldr h3 {
+    margin: 0 0 8px; color: #fff; font-size: 15px;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: #c8c0ff;
+  }
+  .tldr p { margin: 0; color: var(--text); }
+
+  /* ===== Cards ===== */
+  .grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    margin-top: 18px;
+  }
+  .card {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px 22px 20px;
+    transition: transform .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(124,92,255,.5);
+    background: var(--bg-2);
+  }
+  .card .icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 700;
+    background: rgba(124,92,255,.14);
+    color: #c8c0ff;
+    margin-bottom: 10px;
+  }
+  .card h4 { margin: 6px 0 8px; font-size: 17px; color: #fff; }
+  .card p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  /* ===== Compare table ===== */
+  .compare {
+    margin-top: 18px;
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    font-size: 14.5px;
+  }
+  .compare th, .compare td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .compare th {
+    text-align: left;
+    background: var(--bg-2);
+    color: #fff;
+    font-weight: 600;
+  }
+  .compare tr:last-child td { border-bottom: none; }
+  .compare td:first-child { color: #c8c0ff; font-weight: 600; white-space: nowrap; }
+  .pill {
+    display: inline-block; font-size: 12px; padding: 2px 8px;
+    border-radius: 999px; margin-right: 6px;
+  }
+  .pill.gpu { background: rgba(255,91,122,.12); color: #ff8aa1; border: 1px solid rgba(255,91,122,.3); }
+  .pill.cpu { background: rgba(61,220,151,.10); color: #6fe7b3; border: 1px solid rgba(61,220,151,.3); }
+  .pill.warn { background: rgba(255,159,67,.10); color: #ffc48a; border: 1px solid rgba(255,159,67,.3); }
+
+  /* ===== Research direction list ===== */
+  .dir {
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px 24px;
+    margin-top: 14px;
+    position: relative;
+  }
+  .dir::before {
+    content: "";
+    position: absolute; left: 0; top: 16px; bottom: 16px;
+    width: 3px; border-radius: 3px;
+    background: linear-gradient(180deg, var(--brand), var(--brand-2));
+  }
+  .dir h3 {
+    margin: 0 0 6px; font-size: 17px; color: #fff;
+  }
+  .dir .why { color: var(--muted); font-size: 14.5px; margin: 0 0 10px; }
+  .dir .keys { display: flex; flex-wrap: wrap; gap: 6px; }
+  .dir .keys span {
+    font-size: 12px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--line);
+    padding: 4px 10px;
+    border-radius: 999px;
+    color: #d8def0;
+  }
+
+  /* ===== Stack diagram ===== */
+  .stack {
+    margin-top: 18px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px;
+    display: grid; gap: 10px;
+  }
+  .layer {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px dashed var(--line);
+  }
+  .layer .lbl {
+    min-width: 130px;
+    font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: #c8c0ff;
+  }
+  .layer .body { color: var(--text); font-size: 14.5px; }
+  .layer.app   { background: rgba(124,92,255,.08); }
+  .layer.orch  { background: rgba(40,211,194,.08); }
+  .layer.model { background: rgba(255,159,67,.07); }
+  .layer.kern  { background: rgba(61,220,151,.07); }
+  .layer.hw    { background: rgba(255,91,122,.06); }
+
+  /* ===== Callouts ===== */
+  .callout {
+    margin-top: 22px;
+    padding: 18px 20px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--bg-1);
+    display: grid; grid-template-columns: 36px 1fr; gap: 14px; align-items: start;
+  }
+  .callout .mark {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 800;
+  }
+  .callout.info .mark  { background: rgba(40,211,194,.14); color: #7be3d6; }
+  .callout.warn .mark  { background: rgba(255,159,67,.14); color: #ffc48a; }
+  .callout p { margin: 0; color: var(--text); }
+  .callout strong { color: #fff; }
+
+  code, .kbd {
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    color: #d8def0;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+
+  /* ===== Footer ===== */
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 13.5px;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+
+  @media (max-width: 640px) {
+    .hero { padding: 36px 22px; }
+    .container { padding: 36px 16px 72px; }
+    .layer { flex-direction: column; align-items: flex-start; gap: 4px; }
+    .layer .lbl { min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ===================== HERO ===================== -->
+  <header class="hero">
+    <span class="eyebrow">Insight · AI Infra · 2026</span>
+    <h1>Agent 时代，为什么 CPU 推理优化反而更重要了？</h1>
+    <p class="subtitle">
+      当推理成为 AI 的主战场、当一次用户请求被放大成数十甚至上百次模型调用，
+      "用 GPU 跑大模型" 不再是唯一答案。CPU 正在以 <strong>无处不在、海量内存、低成本闲置</strong>
+      的特性，重新回到 AI 推理栈的中心。
+    </p>
+    <div class="hero-meta">
+      <span class="tag">关键词：Agent · LLM 推理 · CPU 优化</span>
+      <span class="tag">面向：AI Infra / 系统研究 / 算法工程</span>
+      <span class="tag">视角：成本 · 延迟 · 隐私 · 能效</span>
+    </div>
+  </header>
+
+  <!-- ===================== TL;DR ===================== -->
+  <div class="tldr">
+    <h3>TL;DR — 一句话洞察</h3>
+    <p>
+      Agent 把"一次大模型推理"变成了 "一条由数十个长上下文、小批量、低延迟、异构模型组成的调用链"，
+      而这条调用链的瓶颈恰好落在 <strong>访存带宽、内存容量、调度灵活性、闲置弹性</strong> ——
+      这正是 CPU 相对 GPU 最有可能扳回的战场。
+    </p>
+  </div>
+
+  <!-- ===================== 趋势变化 ===================== -->
+  <section>
+    <h2><span class="num">1</span>趋势变化：从"训练为王"到"推理决定单位经济"</h2>
+    <p class="lead">
+      过去三年关注点是"如何把模型训得更大";Agent 时代关注点是"如何把模型用得更便宜、更快、更可控"。
+      这是一次工作负载性质的根本变化，下面六个事实直接推动了 CPU 重新被严肃对待。
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="icon">①</div>
+        <h4>调用次数被放大 10–100 倍</h4>
+        <p>
+          一次用户请求 = Plan + Tool Select + Reflect + Critique + Rerank + Guardrail + …
+          单步小、链路长，整体由"延迟和成本"主导，而不是单步峰值算力。
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon">②</div>
+        <h4>解码阶段是访存瓶颈</h4>
+        <p>
+          自回归解码本质是 <code>权重 + KV cache</code> 的内存搬运，
+          当 batch 很小（Agent 常态）时，GPU 算力大量闲置，差距收敛到访存带宽 + 内存容量。
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon">③</div>
+        <h4>GPU 在 Agent 链路中常被"卡住"</h4>
+        <p>
+          Agent 频繁等待工具调用、网络 I/O、人类输入。GPU 闲置 = 烧钱;
+          CPU 天然适合"波动大、长尾、突发"的弹性负载。
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon">④</div>
+        <h4>小模型成为主力</h4>
+        <p>
+          路由、改写、嵌入、重排、判别、JSON 校验、函数调用……
+          80% 的 Agent 内部调用其实是 1B–8B 量化模型，CPU 完全 hold 得住。
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon">⑤</div>
+        <h4>端侧 / 私有化 Agent 爆发</h4>
+        <p>
+          PC、手机、车机、IoT、企业内网。隐私、离线、个性化记忆 ——
+          这些场景里 GPU 不一定有，但 CPU 一定在。
+        </p>
+      </div>
+      <div class="card">
+        <div class="icon">⑥</div>
+        <h4>现代 CPU 不再是过去的 CPU</h4>
+        <p>
+          Intel AMX、AVX-512 VNNI、ARM SVE2 / SME、Apple AMX、
+          CXL 大内存池，以及 INT4/INT8 量化在 CPU 上的成熟，让差距大幅缩小。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== GPU vs CPU ===================== -->
+  <section>
+    <h2><span class="num">2</span>对比视角：Agent 工作负载下 GPU 与 CPU 的真实差距</h2>
+    <p class="lead">
+      与"训练巨型模型"不同，Agent 的内部调用呈现出一组非常特殊的特征。把这些特征逐一展开，
+      就能看到为什么 CPU 不再是"备胎"，而是"互补主力"。
+    </p>
+
+    <table class="compare">
+      <thead>
+        <tr>
+          <th>负载特征</th>
+          <th>GPU 倾向</th>
+          <th>CPU 倾向</th>
+          <th>Agent 实际场景</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Batch size</td>
+          <td><span class="pill gpu">大 batch 强</span></td>
+          <td><span class="pill cpu">小 batch 不亏</span></td>
+          <td>每个 Agent step 通常 batch=1~4</td>
+        </tr>
+        <tr>
+          <td>上下文长度</td>
+          <td><span class="pill warn">受限于显存</span></td>
+          <td><span class="pill cpu">DRAM 廉价 TB 级</span></td>
+          <td>记忆 + 历史 + 工具描述，动辄 100K+ token</td>
+        </tr>
+        <tr>
+          <td>调用形态</td>
+          <td><span class="pill gpu">长稳态吞吐</span></td>
+          <td><span class="pill cpu">突发 + 长尾</span></td>
+          <td>等工具、等用户、等检索 → 大量空闲</td>
+        </tr>
+        <tr>
+          <td>模型规模</td>
+          <td><span class="pill gpu">70B+ 旗舰</span></td>
+          <td><span class="pill cpu">1B–13B 量化</span></td>
+          <td>Router / Drafter / Embedder / Guard 多为小模型</td>
+        </tr>
+        <tr>
+          <td>部署位置</td>
+          <td><span class="pill gpu">云端集中</span></td>
+          <td><span class="pill cpu">端 / 边 / 云全覆盖</span></td>
+          <td>个人 Agent、企业内 Agent、隐私 Agent</td>
+        </tr>
+        <tr>
+          <td>每 token 成本结构</td>
+          <td><span class="pill gpu">高资本开销</span></td>
+          <td><span class="pill cpu">已有存量算力</span></td>
+          <td>Agent 长链路对 $/token 极度敏感</td>
+        </tr>
+        <tr>
+          <td>机密计算</td>
+          <td><span class="pill warn">生态尚浅</span></td>
+          <td><span class="pill cpu">TDX / SEV / SGX 成熟</span></td>
+          <td>处理私有数据、企业知识、用户记忆</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout info">
+      <div class="mark">!</div>
+      <p>
+        <strong>关键判断：</strong>
+        在 Agent 时代，"GPU 跑主力模型 + CPU 跑长尾 / 小模型 / KV / 调度 / 安全"
+        将是大多数生产系统的稳态形态。CPU 推理优化不是去取代 GPU，
+        而是去 <strong>填满 GPU 不擅长的所有缝隙</strong>，从而把整条 Agent 链路的端到端延迟和单位经济压下来。
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== 调用栈视角 ===================== -->
+  <section>
+    <h2><span class="num">3</span>系统视角：Agent 推理栈中 CPU 的"真正位置"</h2>
+    <p class="lead">
+      把一个真实的 Agent 系统拆开看，CPU 远不只是"跑小模型"。它同时承担调度、KV、加密、
+      约束解码、工具桥接等关键角色。下面是一个典型的分层视图。
+    </p>
+
+    <div class="stack">
+      <div class="layer app">
+        <div class="lbl">Agent 应用层</div>
+        <div class="body">Planner / ReAct / Reflexion / Multi-agent 协作 / 工具调用</div>
+      </div>
+      <div class="layer orch">
+        <div class="lbl">编排与调度</div>
+        <div class="body">路由小模型、语义缓存、前缀复用、KV 命中、CPU↔GPU 任务分配</div>
+      </div>
+      <div class="layer model">
+        <div class="lbl">模型服务</div>
+        <div class="body">大模型（GPU）+ Drafter / Embedder / Reranker / Guardrail（CPU）</div>
+      </div>
+      <div class="layer kern">
+        <div class="lbl">推理内核</div>
+        <div class="body">量化 GEMM、PagedAttention、Speculative Decoding、约束解码 FSM</div>
+      </div>
+      <div class="layer hw">
+        <div class="lbl">硬件与指令集</div>
+        <div class="body">AMX / AVX-512 VNNI / SVE2 / SME / NUMA / CXL / TDX·SEV·SGX</div>
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <div class="mark">⚠</div>
+      <p>
+        <strong>容易被忽视的事实：</strong>
+        即使一个 Agent 系统"主模型在 GPU 上"，它在 CPU 上仍然有
+        <em>tokenizer、采样、约束解码、KV 管理、prefix 缓存、工具序列化、向量检索、安全审查</em>
+        等大量关键路径。这些环节的延迟往往直接决定用户感知的"Agent 卡不卡"。
+      </p>
+    </div>
+  </section>
+
+  <!-- ===================== 关键研究方向 ===================== -->
+  <section>
+    <h2><span class="num">4</span>关键研究方向：值得长期投入的 10 个方向</h2>
+    <p class="lead">
+      下面给出在 Agent 时代具有较高研究密度与工程价值的 CPU 推理方向。每一条都同时包含
+      <em>"为什么重要"</em> 与 <em>"代表性技术 / 工作"</em>，便于直接展开为研究计划或预研课题。
+    </p>
+
+    <div class="dir">
+      <h3>① CPU 友好的极致量化（W4A8 / W4A16 / FP8 / 混合精度）</h3>
+      <p class="why">
+        Agent 链路对每 token 成本极敏感，量化是把模型放进 CPU 内存带宽预算内的前提。
+        重点在于：保 Agent 任务（推理、函数调用、JSON 输出）准确率，而不仅是 perplexity。
+      </p>
+      <div class="keys">
+        <span>GPTQ</span><span>AWQ</span><span>SmoothQuant</span>
+        <span>OmniQuant</span><span>QuaRot / SpinQuant</span>
+        <span>Activation-aware</span><span>VNNI / AMX 适配</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>② CPU 专用算子与编译栈</h3>
+      <p class="why">
+        充分释放 AMX / AVX-512 / SVE2 / SME 的算力，并解决 NUMA、cache locality、
+        prefetch 等访存问题。编译栈决定了"同一模型在 CPU 上能跑多快"的上限。
+      </p>
+      <div class="keys">
+        <span>llama.cpp / ggml</span><span>OpenVINO GenAI</span>
+        <span>oneDNN</span><span>IPEX-LLM</span>
+        <span>Triton-CPU</span><span>MLIR / IREE</span>
+        <span>TVM / MLC-LLM</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>③ 稀疏化与上下文相关稀疏（Contextual Sparsity）</h3>
+      <p class="why">
+        FFN 与 head 的激活在解码阶段大量为零或近零，CPU 上跳过它们的收益比 GPU 更大
+        (CPU 控制流便宜)。MoE 在 CPU 上的稀疏路由也属于此方向。
+      </p>
+      <div class="keys">
+        <span>Deja Vu</span><span>PowerInfer / PowerInfer-2</span>
+        <span>LLM-MQ</span><span>MoE-Lightning</span>
+        <span>Activation Sparsity</span><span>Hot/Cold neuron 划分</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>④ KV Cache 管理：压缩、复用、跨步缓存</h3>
+      <p class="why">
+        Agent 多步对话 / ReAct 循环 / Multi-agent 之间存在大量 prefix 重叠，
+        CPU 大内存 + 智能 KV 调度可以把"重复 prefill"几乎消掉。这是端到端延迟最大的优化空间之一。
+      </p>
+      <div class="keys">
+        <span>PagedAttention / vLLM</span><span>RadixAttention / SGLang</span>
+        <span>H2O</span><span>StreamingLLM</span>
+        <span>KV 量化（KIVI / KVQuant）</span><span>Prefix sharing</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>⑤ 推测解码与小-大模型协同（CPU 做 Drafter）</h3>
+      <p class="why">
+        让 CPU 跑 Draft 模型、GPU 做 Verify;或在纯 CPU 场景中用 Medusa / EAGLE
+        把解码并行度拉起来。这是 CPU 在 latency 上"反超"的关键武器。
+      </p>
+      <div class="keys">
+        <span>Speculative Decoding</span><span>Medusa</span>
+        <span>EAGLE / EAGLE-2</span><span>Lookahead Decoding</span>
+        <span>SpecInfer</span><span>Self-Speculative</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>⑥ CPU↔GPU 异构调度与 Offloading</h3>
+      <p class="why">
+        把热权重放 GPU、冷权重放 CPU/CXL，把短上下文放 GPU、长上下文放 CPU 内存，
+        把 Drafter / Embedder / Guard 放 CPU、把 Verifier 放 GPU。
+        Agent 工作负载的高度异构性使这条路线天然可行。
+      </p>
+      <div class="keys">
+        <span>FlexGen</span><span>FastDecode</span>
+        <span>NEO / Hetero-serving</span><span>CXL 内存池</span>
+        <span>动态权重迁移</span><span>NUMA-aware placement</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>⑦ Agent 感知的推理系统（Agent-Aware Serving）</h3>
+      <p class="why">
+        让推理系统理解"这是一个 Agent 调用链"，从而做：
+        前缀共享、跨步 KV 复用、工具调用期间 KV 暂存、语义级缓存、
+        优先级抢占、链路级 SLA 调度。这是一个目前明显缺位的研究方向。
+      </p>
+      <div class="keys">
+        <span>SGLang</span><span>语义缓存 / GPTCache</span>
+        <span>跨 step KV 复用</span><span>Tool-aware scheduling</span>
+        <span>链路级 SLO</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>⑧ 约束解码 / 函数调用 / 结构化输出在 CPU 上的加速</h3>
+      <p class="why">
+        Agent 极度依赖 JSON / Schema / 工具签名，约束解码本质是
+        <em>每步采样都要乘上一个掩码</em>。这个掩码计算在 CPU 上完全可以做到零开销，
+        但常被实现成主路径瓶颈。是被严重低估的工程方向。
+      </p>
+      <div class="keys">
+        <span>Outlines</span><span>XGrammar</span>
+        <span>llguidance</span><span>JSON-mode FSM</span>
+        <span>Tokenizer 加速</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>⑨ 端侧 / 边缘 Agent 的全栈优化</h3>
+      <p class="why">
+        个人 Agent、设备 Agent、车载 Agent 的核心约束就是"没有 GPU、有大量 DRAM、
+        必须低功耗"。CPU + NPU 协同、模型蒸馏、人格化记忆与隐私保护是一整套子领域。
+      </p>
+      <div class="keys">
+        <span>Phi / Gemma / Qwen-small</span>
+        <span>MLC-LLM</span><span>llama.cpp</span>
+        <span>Apple MLX</span><span>MediaPipe LLM</span>
+        <span>Phi Silica</span>
+      </div>
+    </div>
+
+    <div class="dir">
+      <h3>⑩ 机密推理与可信 Agent（Confidential Inference）</h3>
+      <p class="why">
+        Agent 处理大量私人 / 企业敏感数据。CPU 上的 TEE 生态明显领先 GPU。
+        如何在 TDX / SEV-SNP 中以可控开销跑量化 LLM 与 KV 缓存，是企业级 Agent 落地的硬门槛。
+      </p>
+      <div class="keys">
+        <span>Intel TDX</span><span>AMD SEV-SNP</span>
+        <span>ARM CCA</span><span>加密 KV</span>
+        <span>远程证明 Attestation</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 给研究者的建议 ===================== -->
+  <section>
+    <h2><span class="num">5</span>给研究者 / 工程团队的实操建议</h2>
+    <p class="lead">
+      不是所有方向都同样"好下手"。以下是按"投入产出比 × 与 Agent 主流演进契合度"给出的优先级建议。
+    </p>
+
+    <div class="grid">
+      <div class="card">
+        <div class="icon">★</div>
+        <h4>优先做：KV 复用 + 前缀共享</h4>
+        <p>对 Agent 链路是 10× 量级的端到端收益，且 CPU 的大内存是天然优势，工程难度可控。</p>
+      </div>
+      <div class="card">
+        <div class="icon">★</div>
+        <h4>优先做：CPU Drafter 推测解码</h4>
+        <p>在不牺牲精度的前提下提升解码并行度，特别适合 1B–8B 小模型直接在 CPU 上跑出 2–3× 加速。</p>
+      </div>
+      <div class="card">
+        <div class="icon">★</div>
+        <h4>优先做：约束解码内核优化</h4>
+        <p>工程量小、收益直接、用户感知强；很多 Agent 卡顿其实来自 JSON 约束解码而非模型本身。</p>
+      </div>
+      <div class="card">
+        <div class="icon">◇</div>
+        <h4>中期投入：异构调度框架</h4>
+        <p>需要同时改运行时、调度器、KV 系统，门槛高，但一旦做成是平台级护城河。</p>
+      </div>
+      <div class="card">
+        <div class="icon">◇</div>
+        <h4>中期投入：Agent-Aware Serving</h4>
+        <p>当前服务系统把 Agent 视作"独立请求流"，留下大量未捕获的复用与共享机会。</p>
+      </div>
+      <div class="card">
+        <div class="icon">○</div>
+        <h4>长期下注：CPU 上的机密 Agent</h4>
+        <p>面向企业市场与监管场景，护城河深、变现路径清晰，但需要硬件 + 内核 + 模型的全栈协同。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 结语 ===================== -->
+  <section>
+    <h2><span class="num">6</span>结语：CPU 推理优化，是一场"被 Agent 重启"的老课题</h2>
+    <p class="lead">
+      十年前我们优化 CPU 推理，是因为没有别的选择;今天我们重新优化 CPU 推理，
+      是因为 Agent 把推理工作负载切成了无数小、长、散、敏感的碎片 ——
+      而碎片化负载的最优载体，从来不是峰值算力，而是<strong>无处不在、足够便宜、足够灵活</strong>的算力。
+    </p>
+    <div class="callout info">
+      <div class="mark">✦</div>
+      <p>
+        <strong>一句记忆点：</strong>
+        Agent 时代不是"GPU vs CPU"，而是"<em>谁能让一条 Agent 调用链整体跑得更便宜更快</em>"。
+        在这个新指标下，CPU 推理优化从"边缘话题"重新回到了 AI 系统研究的中央舞台。
+      </p>
+    </div>
+  </section>
+
+  <footer>
+    <span>Insight · CPU Inference in the Agent Era</span>
+    <span>Generated 2026 · 仅供研究方向参考</span>
+  </footer>
+</div>
+</body>
+</html>
