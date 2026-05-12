@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>命令行召回 Skill 高准确率设计方案</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg-2: #111733;
+    --panel: #151c3a;
+    --panel-2: #1b234a;
+    --line: #2a3568;
+    --text: #e6ecff;
+    --text-dim: #aab3d4;
+    --muted: #8a92b6;
+    --accent: #7aa2ff;
+    --accent-2: #b58bff;
+    --accent-3: #59e1c4;
+    --warn: #ffcf6f;
+    --danger: #ff7a8a;
+    --ok: #6bd58f;
+    --code-bg: #0a0f24;
+    --code-line: #1c2447;
+    --shadow: 0 10px 30px rgba(0,0,0,.35);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: var(--text);
+    background: radial-gradient(1200px 800px at 80% -10%, #1a235a 0%, transparent 60%),
+                radial-gradient(900px 700px at -10% 30%, #2a1a5a 0%, transparent 60%),
+                linear-gradient(180deg, #070b1e 0%, #0b1020 100%);
+    min-height: 100vh;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* layout */
+  .topbar {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(8, 12, 32, 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar-inner {
+    max-width: 1400px; margin: 0 auto; padding: 14px 28px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 16px; letter-spacing: .3px; }
+  .brand .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 0 18px rgba(122,162,255,.55);
+  }
+  .brand small { color: var(--text-dim); font-weight: 500; }
+  .topbar a.gh {
+    color: var(--text-dim); text-decoration: none; font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+  }
+  .topbar a.gh:hover { color: var(--text); border-color: var(--accent); }
+
+  .layout {
+    max-width: 1400px; margin: 0 auto; padding: 28px;
+    display: grid; grid-template-columns: 260px 1fr; gap: 32px;
+  }
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static !important; max-height: none !important; }
+  }
+  .toc {
+    position: sticky; top: 72px;
+    align-self: start;
+    max-height: calc(100vh - 90px);
+    overflow: auto;
+    padding: 18px;
+    background: linear-gradient(180deg, rgba(21,28,58,.85), rgba(21,28,58,.55));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .toc h4 { margin: 0 0 12px; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+  .toc ol { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+  .toc ol li { counter-increment: toc; margin: 4px 0; }
+  .toc ol li a {
+    display: block; padding: 7px 10px; color: var(--text-dim); text-decoration: none;
+    border-left: 2px solid transparent; border-radius: 6px; font-size: 14px;
+  }
+  .toc ol li a::before { content: counter(toc, decimal) ". "; color: var(--muted); margin-right: 4px; }
+  .toc ol li a:hover { background: rgba(122,162,255,.08); color: var(--text); }
+  .toc ol li a.active { color: var(--accent); background: rgba(122,162,255,.10); border-left-color: var(--accent); }
+
+  main { min-width: 0; }
+  .hero {
+    padding: 36px 32px; margin-bottom: 28px;
+    background:
+      radial-gradient(600px 300px at 90% -50%, rgba(181,139,255,.35), transparent 60%),
+      radial-gradient(700px 280px at -10% 120%, rgba(89,225,196,.18), transparent 60%),
+      linear-gradient(180deg, rgba(27,35,74,.95), rgba(21,28,58,.95));
+    border: 1px solid var(--line);
+    border-radius: 20px; box-shadow: var(--shadow);
+  }
+  .hero .eyebrow {
+    display: inline-block; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+    color: var(--text-dim); font-size: 12px; letter-spacing: .8px; text-transform: uppercase;
+  }
+  .hero h1 {
+    font-size: 38px; line-height: 1.18; margin: 14px 0 12px; letter-spacing: -.5px;
+    background: linear-gradient(120deg, #fff, #b9c6ff 40%, #d3b6ff 75%, #84e9d2);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p.lead { color: var(--text-dim); font-size: 16.5px; margin: 0 0 18px; max-width: 920px; }
+  .hero .meta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; font-size: 12px; color: var(--text-dim); background: rgba(122,162,255,.08); border: 1px solid var(--line); }
+  .chip.accent { color: var(--accent); border-color: rgba(122,162,255,.45); }
+  .chip.green { color: var(--ok); border-color: rgba(107,213,143,.4); }
+  .chip.purple { color: var(--accent-2); border-color: rgba(181,139,255,.4); }
+  .chip.warn { color: var(--warn); border-color: rgba(255,207,111,.4); }
+
+  section { padding: 28px 4px; }
+  section + section { border-top: 1px dashed rgba(122,162,255,.18); }
+  h2 { font-size: 26px; margin: 0 0 8px; letter-spacing: -.3px; }
+  h2 .num {
+    display: inline-block; padding: 2px 10px; font-size: 14px; color: var(--accent);
+    border: 1px solid rgba(122,162,255,.4); border-radius: 6px; margin-right: 12px; vertical-align: middle;
+    background: rgba(122,162,255,.08);
+  }
+  h3 { font-size: 19px; margin: 24px 0 8px; color: #d6def7; }
+  h4 { font-size: 15px; margin: 18px 0 6px; color: #cfd6f3; letter-spacing: .2px; }
+  p { color: var(--text); }
+  .lead-2 { color: var(--text-dim); margin-top: 0; }
+
+  /* cards */
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  @media (max-width: 860px) { .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; } }
+  .card {
+    background: linear-gradient(180deg, rgba(21,28,58,.9), rgba(21,28,58,.65));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px 18px 16px;
+  }
+  .card h4 { margin-top: 0; color: #fff; }
+  .card .kicker { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; }
+  .card.acc { border-color: rgba(122,162,255,.35); }
+  .card.kb1 { border-color: rgba(89,225,196,.3); }
+  .card.kb2 { border-color: rgba(181,139,255,.3); }
+  .card.kb3 { border-color: rgba(255,207,111,.3); }
+
+  /* tables */
+  .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { color: var(--text-dim); font-weight: 600; background: rgba(255,255,255,.02); position: sticky; top: 0; }
+  td code { background: rgba(122,162,255,.08); padding: 1px 6px; border-radius: 4px; }
+  tr:last-child td { border-bottom: 0; }
+  tr:hover td { background: rgba(122,162,255,.04); }
+
+  /* code */
+  pre {
+    background: var(--code-bg);
+    color: #d8e1ff;
+    border: 1px solid var(--code-line);
+    border-radius: 12px; padding: 14px 16px; overflow: auto; font-size: 13.5px; line-height: 1.55;
+    box-shadow: inset 0 0 0 1px rgba(122,162,255,.04);
+  }
+  code.inline { background: rgba(122,162,255,.10); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
+  .json .k { color: #b58bff; }
+  .json .s { color: #6bd58f; }
+  .json .n { color: #ffcf6f; }
+  .json .b { color: #7aa2ff; }
+  .json .c { color: #8a92b6; font-style: italic; }
+  .codeblock-title {
+    display: inline-block; padding: 4px 10px; border-radius: 8px 8px 0 0;
+    background: var(--code-line); color: var(--text-dim);
+    font-size: 12px; border: 1px solid var(--code-line); border-bottom: 0;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .codeblock-title + pre { border-top-left-radius: 0; }
+
+  /* callouts */
+  .callout {
+    display: flex; gap: 12px; padding: 14px 16px; border-radius: 12px;
+    background: rgba(122,162,255,.08); border: 1px solid rgba(122,162,255,.25);
+    margin: 14px 0;
+  }
+  .callout .icon { font-size: 18px; line-height: 1.4; }
+  .callout.ok { background: rgba(107,213,143,.08); border-color: rgba(107,213,143,.3); }
+  .callout.warn { background: rgba(255,207,111,.08); border-color: rgba(255,207,111,.3); }
+  .callout.danger { background: rgba(255,122,138,.08); border-color: rgba(255,122,138,.3); }
+  .callout p { margin: 0; }
+  .callout p + p { margin-top: 6px; }
+
+  /* mermaid container */
+  .mermaid-wrap {
+    background: linear-gradient(180deg, rgba(10,15,36,.85), rgba(10,15,36,.6));
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px; overflow: auto;
+  }
+  .mermaid { font-family: 'Inter', sans-serif; }
+
+  /* pipeline */
+  .pipeline {
+    display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; align-items: stretch;
+    background: rgba(122,162,255,.04); border: 1px solid var(--line); border-radius: 12px; padding: 10px;
+    overflow: auto;
+  }
+  .pipeline .step {
+    background: linear-gradient(180deg, rgba(21,28,58,.95), rgba(21,28,58,.6));
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 130px;
+    font-size: 12.5px; color: var(--text-dim);
+  }
+  .pipeline .step b { display: block; color: var(--text); margin-bottom: 4px; }
+
+  /* case banner */
+  .case-banner {
+    padding: 16px 18px; border-radius: 12px; border: 1px dashed rgba(181,139,255,.45);
+    background: linear-gradient(120deg, rgba(181,139,255,.06), rgba(89,225,196,.06));
+    margin-bottom: 14px;
+  }
+  .case-banner .label { color: var(--accent-2); font-size: 12px; letter-spacing: 1.4px; text-transform: uppercase; }
+  .case-banner .intent { font-size: 16px; margin-top: 6px; }
+  .case-banner .intent code { background: rgba(255,255,255,.06); padding: 4px 8px; border-radius: 6px; }
+
+  /* role tag */
+  .role { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); }
+  .role.enter { color: #7aa2ff; border-color: rgba(122,162,255,.45); background: rgba(122,162,255,.08); }
+  .role.prereq { color: #ffcf6f; border-color: rgba(255,207,111,.4); background: rgba(255,207,111,.08); }
+  .role.primary { color: #59e1c4; border-color: rgba(89,225,196,.45); background: rgba(89,225,196,.08); }
+  .role.companion { color: #b58bff; border-color: rgba(181,139,255,.4); background: rgba(181,139,255,.08); }
+  .role.display { color: #aab3d4; border-color: var(--line); background: rgba(170,179,212,.08); }
+  .role.undo { color: #ff9aa5; border-color: rgba(255,122,138,.4); background: rgba(255,122,138,.08); }
+  .role.exclude { color: #ff7a8a; border-color: rgba(255,122,138,.5); background: rgba(255,122,138,.06); }
+
+  /* footer */
+  footer {
+    max-width: 1400px; margin: 28px auto; padding: 18px 28px;
+    color: var(--text-dim); font-size: 13px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* anchor offset */
+  section[id] { scroll-margin-top: 80px; }
+
+  ul.clean { padding-left: 18px; }
+  ul.clean li { margin: 4px 0; }
+
+  /* tiny */
+  .small { color: var(--text-dim); font-size: 12.5px; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+  .right { text-align: right; }
+  .center { text-align: center; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>命令行召回 Skill · 高准确率设计方案</span>
+      <small>· Statistical KB + LLM Rules + LLM Judge</small>
+    </div>
+    <a class="gh" href="#case">查看案例 ↓</a>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="toc">
+    <h4>目录</h4>
+    <ol>
+      <li><a href="#goals">设计目标与核心思想</a></li>
+      <li><a href="#architecture">整体架构</a></li>
+      <li><a href="#phase1">阶段1：统计依赖知识库</a></li>
+      <li><a href="#phase2">阶段2：LLM 读手册产规则</a></li>
+      <li><a href="#phase3">阶段3：在线召回流程</a></li>
+      <li><a href="#accuracy">准确率保障机制</a></li>
+      <li><a href="#case">案例：端到端演示</a></li>
+      <li><a href="#eval">评估闭环</a></li>
+      <li><a href="#roadmap">落地路线</a></li>
+    </ol>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <span class="eyebrow">CLI Recall Skill · Design Document</span>
+      <h1>面向网络配置意图的<br/>命令行高准确率召回方案</h1>
+      <p class="lead">
+        以"命令树 + 真实配置"统计建模为骨架，离线用 LLM 读手册挖掘补漏规则，
+        在线先用静态知识库做第一步识别，再让 LLM 判定 + 查漏补缺。
+        三套知识源互相校验，把"漏召回"和"误召回"双向压下去。
+      </p>
+      <div class="meta">
+        <span class="chip accent">输入 50K 命令</span>
+        <span class="chip green">Recall ≥ 95%</span>
+        <span class="chip purple">Precision ≥ 90%</span>
+        <span class="chip warn">可解释 / 可回放</span>
+        <span class="chip">参考 INTA / NAssim</span>
+      </div>
+    </header>
+
+    <!-- 1. Goals -->
+    <section id="goals">
+      <h2><span class="num">01</span>设计目标与核心思想</h2>
+      <p class="lead-2">
+        给定一个自然语言的用户意图，从设备全量的 50K 行命令中，
+        精准召回出实现该意图所需的**全部**命令，并按"进入视图 / 前置 / 主体 / 显示 / 撤销"分组排序。
+      </p>
+
+      <div class="grid cols-3">
+        <div class="card kb1">
+          <div class="kicker">骨架：统计</div>
+          <h4>静态依赖知识库 G_stat</h4>
+          <p class="lead-2">从命令树 + 真实历史配置中，用 Lift、PMI、PrefixSpan、对象引用解析等统计方法离线构建依赖图。</p>
+        </div>
+        <div class="card kb2">
+          <div class="kicker">补漏：LLM 读手册</div>
+          <h4>规则知识库 R_llm</h4>
+          <p class="lead-2">按章节让 LLM 读 NAssim 结构化手册条目，产出 prerequisite / companion / exclude / scenario_template 四类规则。</p>
+        </div>
+        <div class="card kb3">
+          <div class="kicker">在线：LLM 判定</div>
+          <h4>LLM 精排 + 完整性复查</h4>
+          <p class="lead-2">在线先由静态 KB 做第一步识别，再让 LLM 精排去伪、规则触发补漏，最后做一次反向 challenge 复查。</p>
+        </div>
+      </div>
+
+      <div class="callout">
+        <span class="icon">★</span>
+        <div>
+          <p><b>核心原则：宁多召回，少漏召回；让 LLM 当裁判而不是搜索引擎。</b></p>
+          <p>统计 KB 在毫秒级把候选从 50K 收敛到几百，LLM 仅看候选 + 手册原文做高精度判断；本地依赖图与 LLM 规则双兜底，避免漏前置 / 漏对象引用 / 漏 undo / 漏 display 这类典型缺失。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Architecture -->
+    <section id="architecture">
+      <h2><span class="num">02</span>整体架构</h2>
+      <p class="lead-2">三个阶段、三套知识源、毫秒级 + 秒级两段响应。</p>
+
+      <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+  subgraph OFF1[阶段1 · 统计建模 · 离线]
+    T[命令行树<br/>手册 TOC]
+    F[真实配置文件<br/>大量历史 config]
+    T --> S[静态依赖 KB 构建器]
+    F --> S
+    S --> KB1[G_stat<br/>视图链 / 对象引用<br/>共现 / 序列]
+  end
+
+  subgraph OFF2[阶段2 · LLM 读手册 · 离线]
+    M[NAssim 结构化手册条目]
+    M --> L1[LLM 规则挖掘<br/>按 feature 章节]
+    KB1 --> L1
+    L1 --> KB2[R_llm<br/>prerequisite / companion<br/>exclude / scenario_template]
+    L1 -.对账.-> KB1
+  end
+
+  subgraph ON[阶段3 · 在线召回]
+    Q[用户意图] --> IP[LLM 意图解析<br/>IntentSpec]
+    IP --> R0[第1步: 静态 KB 召回<br/>种子 + 图扩展]
+    KB1 --> R0
+    R0 --> R1[第2步: LLM 精排<br/>+ 规则触发]
+    KB2 --> R1
+    M --> R1
+    R1 --> R2[第3步: LLM 完整性复查]
+    R2 --> O[分组输出<br/>含证据 / 置信度]
+  end
+
+  classDef off fill:#1a2350,stroke:#7aa2ff,color:#e6ecff
+  classDef on fill:#1f1a4a,stroke:#b58bff,color:#e6ecff
+  class OFF1,OFF2 off
+  class ON on
+</pre>
+      </div>
+
+      <h3>响应时延 & 资源分配</h3>
+      <div class="pipeline">
+        <div class="step"><b>S1 意图解析</b>1 LLM 调用 · 强模型</div>
+        <div class="step"><b>S2 种子识别</b>毫秒 · KB 索引</div>
+        <div class="step"><b>S3 图扩展</b>毫秒 · BFS</div>
+        <div class="step"><b>S4 LLM 精排</b>批量 · 中模型</div>
+        <div class="step"><b>S5 规则触发</b>毫秒 · 引擎</div>
+        <div class="step"><b>S6 完整性复查</b>1 LLM 调用 · 强模型</div>
+        <div class="step"><b>S7 结构化输出</b>毫秒</div>
+        <div class="step"><b>S8 落 trace</b>毫秒</div>
+      </div>
+    </section>
+
+    <!-- 3. Phase 1 -->
+    <section id="phase1">
+      <h2><span class="num">03</span>阶段1：基于命令树 + 真实配置的静态依赖知识库</h2>
+      <p class="lead-2">完全本地、可复现、可解释。统计阶段产物用作"高 Recall 兜底"。</p>
+
+      <h3>3.1 输入与预处理</h3>
+      <ul class="clean">
+        <li><b>命令行树</b>：由 NAssim 风格抽取器产出，每条命令含 PageTitle / ParentView / FuncDef / ParaDef / Examples / ExtraInfo / feature / sub_feature。</li>
+        <li><b>真实配置文件</b>：N 份历史设备 config，越多越好，建议数千份起步。</li>
+        <li><b>归一化</b>：去时间戳/注释；接口名 → <code class="inline">&lt;IF&gt;</code>；ACL/模板/实例编号 → 占位符并保留 side-table。</li>
+        <li><b>解析为配置实例树</b>：按缩进 / view 嵌套，每个节点 = (命令模板, 参数值)；匹配回命令树取得命令 ID（最长前缀 + 视图约束）。</li>
+        <li><b>未匹配落 log</b>：作为命令树修订输入。</li>
+      </ul>
+
+      <h3>3.2 五类统计信号</h3>
+      <p class="small">N = 配置文件总数，f(A) = 出现 A 的配置数，f(A,B) = A、B 同现配置数。</p>
+
+      <div class="grid cols-2">
+        <div class="card">
+          <h4>① 共现强度（无序）</h4>
+          <p class="mono">Lift(A,B) = (f(A,B)/N) ÷ ((f(A)/N) · (f(B)/N))</p>
+          <p class="mono">Conf(A → B) = f(A,B) / f(A)</p>
+          <p class="mono">PMI(A,B) = log( f(A,B)·N / (f(A)·f(B)) )</p>
+          <p class="small">筛选示例：<code class="inline">f(A)≥30 ∧ f(A,B)≥10 ∧ Lift≥3 ∧ Conf≥0.6</code> → <code class="inline">companion</code> 边。</p>
+        </div>
+        <div class="card">
+          <h4>② 顺序依赖（A 总在 B 之前）</h4>
+          <p>PrefixSpan 频繁序列对挖掘 + 顺序比：</p>
+          <p class="mono">OrderRatio(A→B) = #{A 早于 B} / #{A,B 同现}</p>
+          <p class="small">≥ 0.95 → <code class="inline">precedes</code> 边。</p>
+        </div>
+        <div class="card">
+          <h4>③ 视图链（结构性事实）</h4>
+          <p>ParentView 给出视图嵌套；配置缩进做交叉验证。</p>
+          <p class="small">任意 view 内命令 ⇒ 必有相应 view 入口命令。这是<b>最强约束</b>。</p>
+        </div>
+        <div class="card">
+          <h4>④ 对象引用图</h4>
+          <p>解析参数值得 create / refer 关系：</p>
+          <p class="mono">acl number 2000 → CREATE acl:2000</p>
+          <p class="mono">traffic-filter ... acl 2000 → REFER acl:2000</p>
+          <p class="small">建 <code class="inline">object_ref</code> 边，比共现可靠得多。</p>
+        </div>
+        <div class="card">
+          <h4>⑤ 特征 / 章节同族</h4>
+          <p>命令树按 feature / sub_feature 自然分组，作为低权重 <code class="inline">sibling</code> 边。</p>
+          <p class="small">长尾命令在统计样本不足时的兜底。</p>
+        </div>
+        <div class="card">
+          <h4>⑥ 派生：命令热度 + 命令簇</h4>
+          <p>热度 = f(A)/N；社区发现（Louvain/Leiden）得"配置模块"，取代表命令作 anchor。</p>
+        </div>
+      </div>
+
+      <h3>3.3 落库：依赖图 G_stat</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>边类型</th><th>推导方式</th><th>强度</th><th>默认权重</th><th>元数据</th></tr></thead>
+          <tbody>
+            <tr><td><code>enter_view</code></td><td>视图结构 + 缩进</td><td>强约束</td><td>1.0</td><td>view chain</td></tr>
+            <tr><td><code>object_ref</code></td><td>参数值引用解析</td><td>强约束</td><td>0.9</td><td>support / 引用次数</td></tr>
+            <tr><td><code>precedes</code></td><td>OrderRatio ≥ 0.95</td><td>强</td><td>0.8</td><td>支持序列数</td></tr>
+            <tr><td><code>companion</code></td><td>Lift+Conf 阈值</td><td>中</td><td>min(1, lift/10)</td><td>support / confidence / lift</td></tr>
+            <tr><td><code>sibling</code></td><td>同 feature</td><td>弱</td><td>0.3</td><td>feature 名</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <span class="icon">⚠</span>
+        <div>
+          <p><b>统计 KB 已知缺陷与缓解</b></p>
+          <p>· 罕见命令样本不足 → 用 sibling 兜底 + 阶段 2 LLM 规则补；<br/>
+             · 老化 config 含过时命令 → 按日期加权；<br/>
+             · 错误配置固化 → 设置最小 support 阈值，规则采样审计；<br/>
+             · 视图链解析失败 → 入 <code class="inline">unmatched.log</code>，反哺修订命令树。</p>
+        </div>
+      </div>
+
+      <h3>3.4 单独看的预期效果</h3>
+      <p>Recall 高（> 90%）、Precision 中（含同特性命令噪音），交给后续 LLM 收敛。</p>
+    </section>
+
+    <!-- 4. Phase 2 -->
+    <section id="phase2">
+      <h2><span class="num">04</span>阶段2：LLM 读手册产规则（补长尾）</h2>
+      <p class="lead-2">对应 INTA 论文的"读手册"思想，但产物是<b>机器可执行的规则</b>而非配置。</p>
+
+      <h3>4.1 LLM 输入单位：章节</h3>
+      <ul class="clean">
+        <li>按 feature 章节喂入，包含若干 NAssim 命令条目；</li>
+        <li>同时把 G_stat 在该章节内已挖出的依赖子图塞给 LLM；</li>
+        <li>LLM 做"合并 + 修正 + 长尾补全"，而不是从零编造。</li>
+      </ul>
+
+      <h3>4.2 规则四种类型</h3>
+      <div class="grid cols-2">
+        <div class="card">
+          <h4><span class="role prereq">prerequisite</span> 前置必加</h4>
+          <p>某命令命中时必须补入的前置命令（进入视图、创建对象等）。</p>
+        </div>
+        <div class="card">
+          <h4><span class="role companion">companion</span> 搭配建议</h4>
+          <p>常搭配命令，弱触发，受 effective_confidence 控制。</p>
+        </div>
+        <div class="card">
+          <h4><span class="role exclude">exclude</span> 互斥剔除</h4>
+          <p>意图含某关键词且候选含某命令时显式删除，解决易混淆（802.1p vs 802.1x）。</p>
+        </div>
+        <div class="card">
+          <h4><span class="role primary">scenario_template</span> 场景模板</h4>
+          <p>整套有序命令模板，主力提升完整性。</p>
+        </div>
+      </div>
+
+      <h3>4.3 规则输出 schema</h3>
+<pre class="json"><code>{
+  <span class="k">"feature"</span>: <span class="s">"Class-based QoS / DiffServ Domain"</span>,
+  <span class="k">"rules"</span>: [
+    {
+      <span class="k">"id"</span>: <span class="s">"DSDOMAIN-001"</span>,
+      <span class="k">"type"</span>: <span class="s">"prerequisite"</span>,
+      <span class="k">"if"</span>: {<span class="k">"candidate_includes"</span>: [<span class="s">"8021p-inbound"</span>]},
+      <span class="k">"then_add"</span>: [<span class="s">"diffserv domain"</span>, <span class="s">"system-view"</span>],
+      <span class="k">"evidence"</span>: <span class="s">"8021p-inbound 的 ParentView 是 DiffServ domain view"</span>,
+      <span class="k">"confidence"</span>: <span class="n">0.95</span>,
+      <span class="k">"source"</span>: <span class="s">"manual_chapter_QoS"</span>
+    },
+    {
+      <span class="k">"id"</span>: <span class="s">"DSDOMAIN-003"</span>,
+      <span class="k">"type"</span>: <span class="s">"exclude"</span>,
+      <span class="k">"if"</span>: {<span class="k">"intent_keywords"</span>: [<span class="s">"802.1x"</span>], <span class="k">"candidate_includes"</span>: [<span class="s">"8021p-inbound"</span>]},
+      <span class="k">"then_remove"</span>: [<span class="s">"8021p-inbound"</span>],
+      <span class="k">"evidence"</span>: <span class="s">"802.1p 是 QoS 而非认证, FuncDef 明确"</span>,
+      <span class="k">"confidence"</span>: <span class="n">0.99</span>
+    },
+    {
+      <span class="k">"id"</span>: <span class="s">"SCENARIO-DS-INBOUND-8021P"</span>,
+      <span class="k">"type"</span>: <span class="s">"scenario_template"</span>,
+      <span class="k">"if"</span>: {<span class="k">"intent_scenarios"</span>: [<span class="s">"DS 域入方向 802.1p 映射"</span>]},
+      <span class="k">"then_include_ordered"</span>: [
+        <span class="s">"system-view"</span>, <span class="s">"diffserv domain"</span>, <span class="s">"8021p-inbound"</span>
+      ],
+      <span class="k">"evidence"</span>: <span class="s">"ExtraInfo · Usage Scenario 段"</span>,
+      <span class="k">"confidence"</span>: <span class="n">0.9</span>
+    }
+  ]
+}</code></pre>
+
+      <h3>4.4 规则与 G_stat 的对账（关键）</h3>
+      <div class="callout">
+        <span class="icon">↔</span>
+        <div>
+          <p>LLM 产物<b>不会直接生效</b>，先对账：</p>
+          <p>① 统计支持：G_stat 存在同向边 ⇒ confidence ↑，标 <code class="inline">cross_validated</code>；<br/>
+             ② 统计反对：Lift &lt; 0.5（独立性强）⇒ confidence ↓，标 <code class="inline">weakly_supported</code>；<br/>
+             ③ 冲突合并：多条规则触发条件重叠 ⇒ 按 confidence 排序，冲突的进入人工复核队列。</p>
+        </div>
+      </div>
+
+      <h3>4.5 LLM 规则挖掘 Prompt（精简）</h3>
+<pre>你是网络命令规则提炼器。下面是同一 feature 的若干命令手册条目，
+以及统计学已知依赖。请输出 JSON 规则（schema 见示例），
+仅输出能被手册 FuncDef/ParaDef/Examples/ExtraInfo 中至少一段文本直接支持的规则。
+
+[手册条目 1..N]
+[已知统计依赖：见表]
+
+要求:
+- 不要发明命令名 (only from manual entries provided)
+- 每条规则必须有 evidence 字段引用对应手册片段
+- 区分强约束 (prerequisite) vs 倾向 (companion)
+- 若发现易混淆命令，输出 exclude 规则</pre>
+    </section>
+
+    <!-- 5. Phase 3 -->
+    <section id="phase3">
+      <h2><span class="num">05</span>阶段3：在线召回流程</h2>
+
+      <h3>5.1 Step 1 · LLM 意图解析 → IntentSpec</h3>
+      <p class="lead-2">把自然语言意图翻译成结构化 IntentSpec，所有后续步骤基于它。模糊意图允许多 IntentSpec 求并集。</p>
+<pre class="json"><code>{
+  <span class="k">"summary"</span>: <span class="s">"在 DS 域内把 802.1p=2 的 VLAN 报文映射为 AF1 并标记为绿色"</span>,
+  <span class="k">"features"</span>: [<span class="s">"QoS"</span>, <span class="s">"DiffServ"</span>],
+  <span class="k">"sub_features"</span>: [<span class="s">"Class-based QoS"</span>, <span class="s">"DS Domain"</span>],
+  <span class="k">"action_types"</span>: [<span class="s">"configure"</span>, <span class="s">"display"</span>],
+  <span class="k">"objects"</span>: [
+    {<span class="k">"name"</span>: <span class="s">"DiffServ domain"</span>, <span class="k">"instance"</span>: <span class="s">"test"</span>},
+    {<span class="k">"name"</span>: <span class="s">"802.1p"</span>, <span class="k">"value"</span>: <span class="n">2</span>},
+    {<span class="k">"name"</span>: <span class="s">"PHB"</span>, <span class="k">"value"</span>: <span class="s">"AF1"</span>},
+    {<span class="k">"name"</span>: <span class="s">"color"</span>, <span class="k">"value"</span>: <span class="s">"green"</span>}
+  ],
+  <span class="k">"direction"</span>: <span class="s">"inbound"</span>,
+  <span class="k">"must_have_keywords"</span>: [<span class="s">"DiffServ"</span>, <span class="s">"802.1p"</span>, <span class="s">"AF1"</span>, <span class="s">"color"</span>],
+  <span class="k">"out_of_scope"</span>: [<span class="s">"IPv6"</span>, <span class="s">"BGP"</span>, <span class="s">"802.1x"</span>]
+}</code></pre>
+
+      <h3>5.2 Step 2 · 静态 KB 第一步识别（完全本地，毫秒级）</h3>
+      <ol>
+        <li>种子识别：依据 objects/features 找 anchor 簇 + must_have_keywords 命中 PageTitle/FuncDef → S_seed（10~30 条）。</li>
+        <li>BFS 图扩展（深度 ≤ 3，加权）：
+          <ul class="clean">
+            <li><code>enter_view</code> 边：祖先视图入口必扩展；</li>
+            <li><code>object_ref</code> 边：引用两端必扩展；</li>
+            <li><code>precedes</code> 边：前置命令必扩展；</li>
+            <li><code>companion</code> 边：按 lift 取 top-K；</li>
+            <li><code>sibling</code> 边：仅在同 feature 时小幅扩展。</li>
+          </ul>
+        </li>
+        <li>输出候选 S_0（200~500），每条携带"经过哪条边 / 哪些统计指标"作为证据。</li>
+      </ol>
+
+      <h3>5.3 Step 3 · LLM 判断 + 规则触发（去伪 + 补漏）</h3>
+      <div class="grid cols-3">
+        <div class="card">
+          <h4>3.1 LLM 精排</h4>
+          <p>按 batch 喂 IntentSpec + 每条命令 NAssim 摘要，输出 <code class="inline">{relevance:0~3, role, must_include, reason}</code>。relevance ≥ 2 保留。</p>
+        </div>
+        <div class="card">
+          <h4>3.2 规则触发</h4>
+          <p>跑 R_llm 规则引擎：prerequisite/companion/exclude/scenario_template 触发，所有新增必须在知识库已知命令中。</p>
+        </div>
+        <div class="card">
+          <h4>3.3 完整性复查</h4>
+          <p>把 S_1 整体回给 LLM 做反向 challenge：缺 enter_view？缺对象创建？缺 undo？所有建议二次校验。</p>
+        </div>
+      </div>
+
+      <h3>5.4 Step 4 · 结构化分组输出</h3>
+      <p>按 role 分组：<span class="role enter">enter_view</span>
+        <span class="role prereq">prerequisite</span>
+        <span class="role primary">primary</span>
+        <span class="role companion">companion</span>
+        <span class="role display">display</span>
+        <span class="role undo">undo</span>，并按视图链排成可执行顺序，每条命令附证据链与置信度。</p>
+    </section>
+
+    <!-- 6. Accuracy -->
+    <section id="accuracy">
+      <h2><span class="num">06</span>准确率保障机制</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>准确率风险</th><th>责任承担者</th></tr></thead>
+          <tbody>
+            <tr><td>漏前置 / 对象引用命令</td><td>G_stat 的 <code>enter_view</code> + <code>object_ref</code> 边（结构性） + R_llm 的 prerequisite 规则双兜底</td></tr>
+            <tr><td>漏冷门搭档</td><td>G_stat <code>companion</code> + R_llm companion 规则双源补全</td></tr>
+            <tr><td>漏 undo / display</td><td>R_llm 的 scenario_template + LLM 完整性复查</td></tr>
+            <tr><td>易混淆命令误召（802.1p vs 802.1x）</td><td>R_llm 的 exclude 规则 + LLM 精排显式判断</td></tr>
+            <tr><td>LLM 幻觉新增不存在的命令</td><td>所有增删强约束"必须来自知识库已知命令"，否则丢弃</td></tr>
+            <tr><td>规则 ↔ 统计冲突</td><td>对账阶段做置信度合成，未解冲突进人工队列</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout ok">
+        <span class="icon">✓</span>
+        <div>
+          <p><b>可解释链路</b>：每条召回都能回答三问 — "统计上凭什么相关 / 哪条规则触发了 / LLM 给的相关性多少分"。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Case -->
+    <section id="case">
+      <h2><span class="num">07</span>案例：端到端演示</h2>
+
+      <div class="case-banner">
+        <div class="label">用户输入意图</div>
+        <div class="intent">
+          <code>在 DiffServ 域 test 内把 802.1p=2 的 VLAN 报文映射为 AF1 并标记为绿色，并查看映射结果。</code>
+        </div>
+      </div>
+
+      <h3>① Step 1 · LLM 意图解析</h3>
+<pre class="json"><code>{
+  <span class="k">"summary"</span>: <span class="s">"在 DS 域 test 内把 802.1p=2 映射为 AF1 绿色, 并查看"</span>,
+  <span class="k">"features"</span>: [<span class="s">"QoS"</span>, <span class="s">"DiffServ"</span>],
+  <span class="k">"sub_features"</span>: [<span class="s">"Class-based QoS"</span>, <span class="s">"DS Domain"</span>],
+  <span class="k">"action_types"</span>: [<span class="s">"configure"</span>, <span class="s">"display"</span>],
+  <span class="k">"objects"</span>: [
+    {<span class="k">"name"</span>: <span class="s">"DiffServ domain"</span>, <span class="k">"instance"</span>: <span class="s">"test"</span>},
+    {<span class="k">"name"</span>: <span class="s">"802.1p"</span>, <span class="k">"value"</span>: <span class="n">2</span>},
+    {<span class="k">"name"</span>: <span class="s">"PHB"</span>, <span class="k">"value"</span>: <span class="s">"AF1"</span>},
+    {<span class="k">"name"</span>: <span class="s">"color"</span>, <span class="k">"value"</span>: <span class="s">"green"</span>}
+  ],
+  <span class="k">"direction"</span>: <span class="s">"inbound"</span>,
+  <span class="k">"must_have_keywords"</span>: [<span class="s">"DiffServ"</span>, <span class="s">"802.1p"</span>, <span class="s">"AF1"</span>, <span class="s">"phb"</span>, <span class="s">"color"</span>],
+  <span class="k">"nice_to_have_keywords"</span>: [<span class="s">"VLAN"</span>, <span class="s">"CoS"</span>, <span class="s">"inbound"</span>, <span class="s">"display"</span>],
+  <span class="k">"out_of_scope"</span>: [<span class="s">"IPv6"</span>, <span class="s">"BGP"</span>, <span class="s">"802.1x"</span>, <span class="s">"802.11"</span>]
+}</code></pre>
+
+      <h3>② Step 2 · 静态 KB 第一步识别（仅本地 G_stat）</h3>
+
+      <h4>2.1 种子识别 S_seed</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>命令 ID</th><th>命中通道</th><th>命中线索</th></tr></thead>
+          <tbody>
+            <tr><td><code>8021p-inbound</code></td><td>名字 + 特性</td><td>PageTitle 含 "8021p"; feature = QoS/DiffServ</td></tr>
+            <tr><td><code>diffserv domain</code></td><td>对象</td><td>IntentSpec.object = DiffServ domain (test)</td></tr>
+            <tr><td><code>display diffserv domain</code></td><td>action=display</td><td>action_types 含 display, 对象匹配</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>2.2 G_stat 子图（实际命中部分）</h4>
+      <div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+  SV[system-view] -->|enter_view w=1.0| DD[diffserv domain]
+  DD -->|enter_view w=1.0| BI[8021p-inbound]
+  DD -->|enter_view w=1.0| BO[8021p-outbound]
+  BI -.companion lift=8.4.- BO
+  BI -.precedes 0.97.- DDA[display diffserv domain]
+  DD -.object_ref 引用 dsdomain:test.- IFTRUST[trust upstream default<br/>interface view]
+  IFTRUST -.companion lift=2.1.- TRUSTBND[interface view enter]
+  BI -.sibling同 Class-based QoS.- IFM8021[if-match 8021p]
+  BI -.companion lift=1.4.- UPS[undo 8021p-inbound]
+
+  classDef hot fill:#1c2b5e,stroke:#7aa2ff,color:#fff
+  classDef warm fill:#22214a,stroke:#b58bff,color:#fff
+  class SV,DD,BI hot
+  class BO,DDA,IFTRUST,UPS warm
+</pre>
+      </div>
+
+      <h4>2.3 候选 S_0（节选）</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>命令</th><th>来源边</th><th>统计</th><th>初步 role</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>system-view</code></td><td>enter_view</td><td>—</td><td><span class="role enter">enter_view</span></td></tr>
+            <tr><td><code>diffserv domain</code></td><td>enter_view + object_ref</td><td>support 5832</td><td><span class="role prereq">prerequisite</span></td></tr>
+            <tr><td><code>8021p-inbound</code></td><td>种子</td><td>—</td><td><span class="role primary">primary</span></td></tr>
+            <tr><td><code>8021p-outbound</code></td><td>companion (lift 8.4)</td><td>conf 0.73</td><td><span class="role companion">companion</span></td></tr>
+            <tr><td><code>display diffserv domain</code></td><td>precedes (OR 0.97)</td><td>support 421</td><td><span class="role display">display</span></td></tr>
+            <tr><td><code>undo 8021p-inbound</code></td><td>companion (lift 1.4)</td><td>conf 0.34</td><td><span class="role undo">undo</span></td></tr>
+            <tr><td><code>if-match 8021p</code></td><td>sibling</td><td>同 sub_feature</td><td><span class="role companion">companion</span></td></tr>
+            <tr><td><code>trust upstream default</code></td><td>object_ref（弱）</td><td>conf 0.18</td><td><span class="role companion">companion</span></td></tr>
+            <tr><td><code>8021x port-method</code></td><td>关键词模糊匹配</td><td>—</td><td><span class="role exclude">疑似混淆</span></td></tr>
+            <tr><td colspan="4" class="small center">… 共 217 条候选</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <span class="icon">!</span>
+        <div>
+          <p>S_0 此时<b>已经把所需命令全部包含进来</b>（Recall 100%），但也带进了同特性噪音（如 <code class="inline">if-match 8021p</code>）和易混淆项（<code class="inline">8021x port-method</code>）。下一步交给 LLM 收敛。</p>
+        </div>
+      </div>
+
+      <h3>③ Step 3.1 · LLM 精排（去伪）</h3>
+      <p class="lead-2">把 S_0 切批喂给 LLM，输入每条命令的 NAssim 条目摘要 + IntentSpec，输出相关性打分。</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>命令</th><th>relevance</th><th>role</th><th>must_include</th><th>LLM reason</th></tr></thead>
+          <tbody>
+            <tr><td><code>system-view</code></td><td>3</td><td>enter_view</td><td>true</td><td>所有 DS 域配置必先进入 system-view</td></tr>
+            <tr><td><code>diffserv domain</code></td><td>3</td><td>prerequisite</td><td>true</td><td>IntentSpec.object 指定 DS 域 test</td></tr>
+            <tr><td><code>8021p-inbound</code></td><td>3</td><td>primary</td><td>true</td><td>FuncDef 明确为入方向 802.1p→CoS 映射，与意图严格一致</td></tr>
+            <tr><td><code>display diffserv domain</code></td><td>3</td><td>display</td><td>true</td><td>意图含"查看映射结果"，且 FuncDef 显示 DS 域内映射</td></tr>
+            <tr><td><code>8021p-outbound</code></td><td>1</td><td>companion</td><td>false</td><td>方向为 outbound, 意图为 inbound, 不强相关</td></tr>
+            <tr><td><code>undo 8021p-inbound</code></td><td>2</td><td>undo</td><td>false</td><td>意图未明确恢复默认, 保留可选</td></tr>
+            <tr><td><code>if-match 8021p</code></td><td>1</td><td>companion</td><td>false</td><td>traffic classifier 内匹配, 不涉及 DS 域映射</td></tr>
+            <tr><td><code>trust upstream default</code></td><td>0</td><td>—</td><td>false</td><td>接口级 trust 与 DS 域内映射目的不同</td></tr>
+            <tr><td><code>8021x port-method</code></td><td>0</td><td>—</td><td>false</td><td>认证特性, 与 QoS 无关</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>④ Step 3.2 · 规则触发（R_llm）</h3>
+      <div class="grid cols-2">
+        <div class="card">
+          <h4><span class="role prereq">prerequisite</span> 命中：DSDOMAIN-001</h4>
+          <p class="small">if: candidate 含 <code class="inline">8021p-inbound</code> ⇒ then_add: <code class="inline">diffserv domain</code>, <code class="inline">system-view</code>。两条已经在 S_0 中，标 <code class="inline">rule_confirmed</code>。</p>
+        </div>
+        <div class="card">
+          <h4><span class="role exclude">exclude</span> 命中：DSDOMAIN-003</h4>
+          <p class="small">if: intent_keywords 含 <code class="inline">802.1x</code> 且 candidate 含 <code class="inline">8021p-inbound</code>。本意图未含 802.1x，但 out_of_scope 含之，触发"反向 exclude"：从 S_0 移除疑似混淆项 <code class="inline">8021x port-method</code>。</p>
+        </div>
+        <div class="card">
+          <h4><span class="role primary">scenario_template</span> 命中：SCENARIO-DS-INBOUND-8021P</h4>
+          <p class="small">intent_scenarios 命中 "DS 域入方向 802.1p 映射"。模板 then_include_ordered:
+          <code class="inline">system-view → diffserv domain → 8021p-inbound</code>，已全部存在，不新增。</p>
+        </div>
+        <div class="card">
+          <h4><span class="role companion">companion</span> 命中：DSDOMAIN-DISPLAY-001</h4>
+          <p class="small">intent action_types 含 display，且 candidate 含 <code class="inline">diffserv domain</code>。建议补 <code class="inline">display diffserv domain application</code>（已在知识库），加入候选。</p>
+        </div>
+      </div>
+
+      <h3>⑤ Step 3.3 · LLM 完整性复查</h3>
+      <p class="lead-2">把当前 S_1 整体回给 LLM 做反向 challenge：</p>
+<pre class="json"><code>{
+  <span class="k">"missing"</span>: [
+    {
+      <span class="k">"command"</span>: <span class="s">"display this"</span>,
+      <span class="k">"reason"</span>: <span class="s">"建议加入: 进入 DS 域视图后可用 display this 查看本视图全部配置, 但与 display diffserv domain 重叠, 保留可选"</span>,
+      <span class="k">"must"</span>: <span class="b">false</span>
+    }
+  ],
+  <span class="k">"redundant"</span>: [
+    {
+      <span class="k">"command"</span>: <span class="s">"8021p-outbound"</span>,
+      <span class="k">"reason"</span>: <span class="s">"意图明确为入方向, 出方向不需要; 由 LLM 精排已降权"</span>
+    }
+  ],
+  <span class="k">"hallucinations_filtered"</span>: []
+}</code></pre>
+      <p class="small">复查结果二次过 G_stat + 知识库存在性校验。<code class="inline">display this</code> 在知识库存在但非必需，标 optional 不进入主输出。</p>
+
+      <h3>⑥ Step 4 · 结构化分组输出（S_final）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>顺序</th><th>分组</th><th>命令</th><th>视图链</th><th>证据 / 置信度</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td><span class="role enter">enter_view</span></td><td><code>system-view</code></td><td>system</td><td>结构性 / 1.00</td></tr>
+            <tr><td>2</td><td><span class="role prereq">prerequisite</span></td><td><code>diffserv domain test</code></td><td>system</td><td>object_ref + rule DSDOMAIN-001 / 0.97</td></tr>
+            <tr><td>3</td><td><span class="role primary">primary</span></td><td><code>8021p-inbound 2 phb af1 green</code></td><td>system → dsdomain-test</td><td>LLM relevance=3 + scenario template / 0.98</td></tr>
+            <tr><td>4</td><td><span class="role display">display</span></td><td><code>display diffserv domain</code></td><td>any</td><td>precedes OR=0.97 + LLM relevance=3 / 0.94</td></tr>
+            <tr><td>5</td><td><span class="role display">display</span></td><td><code>display diffserv domain application</code></td><td>any</td><td>companion rule + LLM 弱相关 / 0.78</td></tr>
+            <tr><td>6</td><td><span class="role undo">undo (可选)</span></td><td><code>undo 8021p-inbound 2</code></td><td>system → dsdomain-test</td><td>companion + LLM relevance=2 / 0.62</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h4>对应可执行 CLI 串</h4>
+<pre>&lt;HUAWEI&gt; system-view
+[~HUAWEI] diffserv domain test
+[*HUAWEI-dsdomain-test] 8021p-inbound 2 phb af1 green
+[*HUAWEI-dsdomain-test] quit
+[*HUAWEI] display diffserv domain
+[*HUAWEI] display diffserv domain application
+# (可选回退) [*HUAWEI] diffserv domain test
+#            [*HUAWEI-dsdomain-test] undo 8021p-inbound 2</pre>
+
+      <h4>本案例的"三问可解释"</h4>
+      <div class="grid cols-3">
+        <div class="card">
+          <h4>统计上凭什么相关？</h4>
+          <p class="small">
+            · <code class="inline">8021p-inbound</code> 与 <code class="inline">diffserv domain</code>：enter_view 结构性边；<br/>
+            · 与 <code class="inline">display diffserv domain</code>：precedes OrderRatio=0.97；<br/>
+            · 与 <code class="inline">8021p-outbound</code>：companion lift=8.4（但方向不符被 LLM 降权）。
+          </p>
+        </div>
+        <div class="card">
+          <h4>哪条规则触发了？</h4>
+          <p class="small">
+            · DSDOMAIN-001 prerequisite 加 system-view / diffserv domain；<br/>
+            · DSDOMAIN-003 exclude 移除 8021x port-method；<br/>
+            · SCENARIO-DS-INBOUND-8021P 模板确认有序；<br/>
+            · DSDOMAIN-DISPLAY-001 补 display diffserv domain application。
+          </p>
+        </div>
+        <div class="card">
+          <h4>LLM 给的相关性多少？</h4>
+          <p class="small">
+            · 5 条命令 relevance=3, must_include=true；<br/>
+            · 1 条 relevance=2 标 undo 可选；<br/>
+            · 2 条原候选 relevance≤1 被过滤（含混淆项与 outbound）。
+          </p>
+        </div>
+      </div>
+
+      <h3>⑦ 整体效果与可观测性</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>阶段</th><th>候选规模</th><th>Recall (vs 金标)</th><th>Precision</th></tr></thead>
+          <tbody>
+            <tr><td>S_0 静态 KB 出口</td><td>217</td><td>100%</td><td>~2.3%</td></tr>
+            <tr><td>S_1 LLM 精排 + 规则</td><td>9</td><td>100%</td><td>~67%</td></tr>
+            <tr><td>S_final 完整性复查</td><td>6 (+1 optional)</td><td>100%</td><td>~100%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small">本案例的金标命令集合：system-view / diffserv domain / 8021p-inbound / display diffserv domain / display diffserv domain application / undo 8021p-inbound（可选）。</p>
+    </section>
+
+    <!-- 8. Evaluation -->
+    <section id="eval">
+      <h2><span class="num">08</span>评估闭环</h2>
+
+      <h3>8.1 金标集合与核心指标</h3>
+      <ul class="clean">
+        <li>挑 200~500 条真实用户意图，工程师标注"完整应配 CLI 列表 + 分组"。</li>
+        <li>关键分位指标：</li>
+      </ul>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>检查点</th><th>指标</th><th>目标</th></tr></thead>
+          <tbody>
+            <tr><td>S_0 静态 KB 出口</td><td>Recall_kb</td><td>≥ 95%</td></tr>
+            <tr><td>S_1 LLM + 规则出口</td><td>Recall_after_llm</td><td>≥ 98%</td></tr>
+            <tr><td>S_final 最终</td><td>Precision / Recall / F1</td><td>≥ 90% / 95% / 92%</td></tr>
+            <tr><td>分组级</td><td>enter_view / prerequisite / primary / display / undo Recall</td><td>各 ≥ 95%</td></tr>
+            <tr><td>易混淆对</td><td>Precision on exclude-prone pairs</td><td>≥ 98%</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>8.2 坏例闭环</h3>
+      <div class="grid cols-2">
+        <div class="card">
+          <h4>S_0 漏召</h4>
+          <p class="small">调统计阈值 / 增对象引用解析规则 / 添加 LLM 规则 prerequisite。</p>
+        </div>
+        <div class="card">
+          <h4>LLM 精排漏</h4>
+          <p class="small">加 few-shot 与命令证据片段；切换更强模型。</p>
+        </div>
+        <div class="card">
+          <h4>规则未触发</h4>
+          <p class="small">在 R_llm 加规则并人工评审；通过对账确认与 G_stat 不冲突。</p>
+        </div>
+        <div class="card">
+          <h4>幻觉 / 误判</h4>
+          <p class="small">收紧规则置信度阈值；强化"必须来自已知命令"约束；增加 exclude 规则。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. Roadmap -->
+    <section id="roadmap">
+      <h2><span class="num">09</span>落地路线</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>阶段</th><th>内容</th><th>期望准确率</th></tr></thead>
+          <tbody>
+            <tr><td>P0</td><td>仅 G_stat + 命令树：共现 / Lift / 视图链 / 对象引用</td><td>Recall 90%, Precision 70%</td></tr>
+            <tr><td>P1</td><td>+ 顺序依赖 + 命令簇 + 同族 sibling</td><td>Recall 95%, Precision 75%</td></tr>
+            <tr><td>P2</td><td>+ LLM 在线精排（不引入规则）</td><td>Recall 95%, Precision 88%</td></tr>
+            <tr><td>P3</td><td>+ R_llm 规则库（prerequisite / exclude）</td><td>Recall 97%, Precision 92%</td></tr>
+            <tr><td>P4</td><td>+ scenario_template + 完整性复查 + 闭环优化</td><td>Recall 98%+, Precision 93%+</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout ok">
+        <span class="icon">→</span>
+        <div>
+          <p><b>建议起点：P0 + P2</b>。统计骨架先把候选收敛到几百，LLM 立刻把 Precision 拉上来；再用 P3、P4 慢慢加规则库降漏。</p>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p>设计文档 · 命令行召回 Skill · 三阶段：统计骨架 + LLM 规则 + LLM 判定。<br/>
+      参考 NAssim / INTA 思想，与本仓库的 HEDEx CLI manual extractor 配套使用。</p>
+    </footer>
+  </main>
+</div>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      background: '#0a0f24',
+      primaryColor: '#1c2b5e',
+      primaryTextColor: '#e6ecff',
+      primaryBorderColor: '#7aa2ff',
+      lineColor: '#7aa2ff',
+      secondaryColor: '#22214a',
+      tertiaryColor: '#1b234a',
+      fontFamily: 'Inter, sans-serif'
+    },
+    flowchart: { htmlLabels: true, curve: 'basis' }
+  });
+</script>
+
+<script>
+  // TOC active highlight
+  const links = document.querySelectorAll('.toc a');
+  const sections = Array.from(document.querySelectorAll('section[id]'));
+  const setActive = () => {
+    const y = window.scrollY + 120;
+    let current = sections[0];
+    for (const s of sections) { if (s.offsetTop <= y) current = s; }
+    links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + current.id));
+  };
+  window.addEventListener('scroll', setActive, { passive: true });
+  window.addEventListener('load', setActive);
+</script>
+
+</body>
+</html>
